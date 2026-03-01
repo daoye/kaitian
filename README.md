@@ -1,48 +1,48 @@
-# KaiTian - AI Marketing Automation Engine
+# KaiTian - AI 营销自动化引擎
 
-**Find marketing opportunities in real-time. Let AI generate replies. You approve. We publish.**
-
----
-
-## What is KaiTian?
-
-KaiTian is a lightweight backend service that powers AI-driven marketing automation. It finds relevant posts on social media, stores them efficiently, and provides simple APIs for orchestration tools like n8n to build complete marketing workflows.
-
-**Core value:** Reduce time-to-reply from hours to seconds. Find 5+ relevant posts daily. Never miss a marketing opportunity again.
+**在线发现营销机会。让 AI 生成回复。你来审核。我们来发布。**
 
 ---
 
-## Architecture: Simple & Modular
+## 什么是 KaiTian？
+
+KaiTian 是一个轻量级后端服务，为 AI 驱动的营销自动化提供动力。它在社交媒体上发现相关帖子，高效地存储它们，并为 n8n 等编排工具提供简单的 API，以构建完整的营销工作流。
+
+**核心价值：** 将回复时间从数小时减少到几秒钟。每天发现 5 个以上相关帖子。再也不会错过营销机会。
+
+---
+
+## 架构：简单且模块化
 
 ```
-Your Marketing Workflow (n8n/Zapier/Custom)
-        ↓
-    KaiTian API
-    ├─ Crawl posts
-    ├─ Store data
-    └─ Publish replies
-        ↓
-   Social Media
-   (Reddit, Twitter, etc.)
+您的营销工作流（n8n/Zapier/自定义）
+         ↓
+     KaiTian API
+     ├─ 抓取帖子
+     ├─ 存储数据
+     └─ 发布回复
+         ↓
+    社交媒体
+    (Reddit、Twitter 等)
 ```
 
-**KaiTian does one thing well:** Crawl, store, and manage marketing posts via API.
+**KaiTian 做一件事做得很好：** 通过 API 抓取、存储和管理营销帖子。
 
-**n8n orchestrates everything else:** Relevance scoring, AI reply generation, human review, publishing.
+**n8n 编排其他所有事情：** 相关性评分、AI 回复生成、人工审核、发布。
 
 ---
 
-## Features
+## 主要功能
 
-✅ **Post Discovery**
-- Find posts containing your keywords on Reddit
-- Crawl any URL with JavaScript rendering support
-- Automatic full-text storage
+✅ **帖子发现**
+- 在 Reddit 上查找包含关键字的帖子
+- 使用 JavaScript 渲染支持抓取任何 URL
+- 自动全文存储
 
-✅ **Data Management**
-- Query posts by status, platform, or date
-- Track post lifecycle (pending → fetched → analyzed → published)
-- SQLite database included
+✅ **数据管理**
+- 按状态、平台或日期查询帖子
+- 跟踪帖子生命周期（待处理 → 已获取 → 已分析 → 已发布）
+- 包含 SQLite 数据库
 
 ✅ **AI 内容生成** (LangChain)
 - 使用 GPT-4/Claude 生成营销文章
@@ -50,21 +50,21 @@ Your Marketing Workflow (n8n/Zapier/Custom)
 - SEO 优化和关键词分析
 - 内容质量评分
 
-✅ **Simple API**
-- Crawl, Query, Update endpoints
-- Content generation endpoints (新增)
-- JSON request/response
-- Designed for n8n HTTP nodes
+✅ **简单 API**
+- 抓取、查询、更新端点
+- 内容生成端点（新增）
+- JSON 请求/响应
+- 为 n8n HTTP 节点设计
 
-✅ **Production-Ready**
-- Docker & Docker Compose included
-- Environment-based configuration
-- Health check endpoint
-- Comprehensive logging and monitoring
+✅ **生产就绪**
+- 包含 Docker 和 Docker Compose
+- 基于环境的配置
+- 健康检查端点
+- 综合日志和监控
 
 ---
 
-## Quick Start
+## 快速开始
 
 ### 方式 1: 使用启动脚本（推荐）
 
@@ -92,9 +92,9 @@ python start.py --help
 docker-compose up -d
 ```
 
-Then:
-- API available at `http://localhost:8000/api/v1`
-- API docs at `http://localhost:8000/docs`
+然后：
+- API 可在 `http://localhost:8000/api/v1` 访问
+- API 文档在 `http://localhost:8000/docs`
 
 ### 方式 3: 手动启动
 
@@ -114,9 +114,9 @@ python main.py
 
 ---
 
-## API Overview
+## API 概览
 
-### 1. Crawl Posts
+### 1. 抓取帖子
 
 ```bash
 POST /api/v1/crawl/url
@@ -128,23 +128,23 @@ Content-Type: application/json
 }
 ```
 
-**Response:**
+**响应：**
 ```json
 {
   "success": true,
   "url": "https://example.com",
-  "content": "# Extracted content in Markdown",
+  "content": "# 以 Markdown 格式提取的内容",
   "extracted_data": {...}
 }
 ```
 
-### 2. List Posts
+### 2. 列出帖子
 
 ```bash
 GET /api/v1/posts?status=pending&limit=10
 ```
 
-**Response:**
+**响应：**
 ```json
 {
   "success": true,
@@ -161,7 +161,7 @@ GET /api/v1/posts?status=pending&limit=10
 }
 ```
 
-### 3. Update Post
+### 3. 更新帖子
 
 ```bash
 PATCH /api/v1/posts/{post_id}
@@ -169,11 +169,11 @@ PATCH /api/v1/posts/{post_id}
 {
   "status": "analyzed",
   "relevance_score": 0.85,
-  "generated_reply": "Great post!"
+  "generated_reply": "很棒的帖子！"
 }
 ```
 
-### 4. Generate Article (LangChain)
+### 4. 生成文章 (LangChain)
 
 ```bash
 POST /api/v1/generate/article
@@ -189,7 +189,7 @@ Content-Type: application/json
 }
 ```
 
-**Response:**
+**响应：**
 ```json
 {
   "success": true,
@@ -209,48 +209,100 @@ Content-Type: application/json
 }
 ```
 
+### 5. 批量生成文章
+
+```bash
+POST /api/v1/generate/articles/batch
+Content-Type: application/json
+
+{
+  "articles": [
+    {
+      "topic": "AI 在营销中的应用",
+      "keywords": ["AI", "营销"],
+      "tone": "professional"
+    },
+    {
+      "topic": "营销自动化工具",
+      "keywords": ["自动化", "工具"],
+      "tone": "friendly"
+    }
+  ]
+}
+```
+
+### 6. SEO 优化
+
+```bash
+POST /api/v1/generate/optimize
+Content-Type: application/json
+
+{
+  "content": "原始文章内容...",
+  "target_keywords": ["AI", "营销"],
+  "optimization_level": "high"
+}
+```
+
+### 7. 获取生成服务状态
+
+```bash
+GET /api/v1/generate/status
+```
+
+**响应：**
+```json
+{
+  "success": true,
+  "status": "available",
+  "llm_provider": "openai",
+  "model": "gpt-3.5-turbo",
+  "timestamp": "2024-03-01T10:00:00"
+}
+```
+
 ---
 
-## Example n8n Workflow
+## 示例 n8n 工作流
 
 ```
-Schedule (every 30 min)
-  ↓
+定时任务（每 30 分钟）
+   ↓
 POST /api/v1/crawl/url
-  ↓
-For Each Post:
-  ├─ Call OpenAI for relevance scoring
-  ├─ PATCH /api/v1/posts/{id}
-  ├─ IF relevant:
-  │   ├─ Generate reply
-  │   ├─ PATCH /api/v1/posts/{id}
-  │   └─ Send Slack notification
-  └─ Wait for human approval
-  ↓
-If approved:
-  └─ Call social media API to reply
+   ↓
+对每个帖子执行：
+   ├─ 调用 OpenAI 进行相关性评分
+   ├─ PATCH /api/v1/posts/{id}
+   ├─ 如果相关：
+   │   ├─ 生成回复
+   │   ├─ PATCH /api/v1/posts/{id}
+   │   └─ 发送 Slack 通知
+   └─ 等待人工审核
+   ↓
+如果批准：
+   └─ 调用社交媒体 API 发布回复
 ```
 
-See [docs/N8N_INTEGRATION.md](docs/N8N_INTEGRATION.md) for detailed examples.
+详见 [docs/N8N_INTEGRATION.md](docs/N8N_INTEGRATION.md)。
 
 ---
 
-## Environment Configuration
+## 环境配置
 
-Create `.env` file:
+创建 `.env` 文件：
 
 ```env
-# KaiTian Core
+# KaiTian 核心
 KAITIAN_API_URL=http://localhost:8000
 KAITIAN_DEBUG=false
 
-# Search Keywords (comma-separated)
+# 搜索关键字（逗号分隔）
 SEARCH_KEYWORDS=automation,marketing,workflow
 
 # Crawl4AI
 CRAWL4AI_API_URL=http://localhost:11235
 
-# Database
+# 数据库
 DATABASE_URL=sqlite:///./kaitian.db
 
 # LangChain & AI 内容生成
@@ -270,6 +322,9 @@ AZURE_DEPLOYMENT_NAME=your_deployment
 # Anthropic Claude 配置 (可选)
 ANTHROPIC_API_KEY=your_anthropic_key
 
+# Google Gemini 配置 (可选)
+GOOGLE_API_KEY=your_google_api_key
+
 # 内容生成配置
 CONTENT_GENERATION_MAX_TOKENS=2000
 CONTENT_GENERATION_TEMPERATURE=0.7
@@ -278,76 +333,79 @@ CONTENT_GENERATION_TIMEOUT=30
 # Redis 缓存 (可选)
 REDIS_ENABLED=false
 REDIS_URL=redis://localhost:6379
+
+# 日志配置
+LOG_LEVEL=INFO
 ```
 
-See `.env.example` for all options.
+所有选项详见 `.env.example`。
 
 ---
 
-## Deployment
+## 部署
 
-### Docker Compose (Local Dev)
+### Docker Compose（本地开发）
 
 ```bash
 docker-compose up -d
 ```
 
-Includes:
-- KaiTian API service
-- Crawl4AI service
+包含：
+- KaiTian API 服务
+- Crawl4AI 服务
 
-### Production
+### 生产环境
 
-1. Build: `docker build -t kaitian:latest .`
-2. Deploy container with environment variables
-3. Mount volume for SQLite database persistence
-4. Set `KAITIAN_DEBUG=false`
+1. 构建：`docker build -t kaitian:latest .`
+2. 使用环境变量部署容器
+3. 为 SQLite 数据库挂载卷以实现持久化
+4. 设置 `KAITIAN_DEBUG=false`
 
-See [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md) for details.
-
----
-
-## Key Concepts
-
-### Post Status Lifecycle
-
-Posts move through stages:
-- `pending`: Initial crawl
-- `fetched`: Retrieved from source
-- `analyzed`: AI relevance scored
-- `relevant`: Meets relevance threshold
-- `reply_generated`: AI reply created
-- `reply_approved`: Human approved
-- `published`: Posted to social media
-- `ignored`: Skipped by human
-
-### Separation of Concerns
-
-| Component | Responsibility |
-|-----------|-----------------|
-| **KaiTian** | Crawl posts, store data, provide API |
-| **n8n** | Orchestration, AI analysis, human flow, direct API calls |
-
-This keeps KaiTian lightweight and lets n8n do what it does best: workflow automation.
+详见 [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)。
 
 ---
 
-## FAQ
+## 核心概念
 
-**Q: Do I need Crawl4AI?**  
-A: Yes for JavaScript-rendered content. For simple HTML, you can use any HTTP client.
+### 帖子状态生命周期
 
-**Q: Can KaiTian publish directly to Reddit?**  
-A: No. KaiTian stores and retrieves data. n8n orchestrates publishing via social media APIs directly.
+帖子经历以下阶段：
+- `pending`：初始抓取
+- `fetched`：从源检索
+- `analyzed`：AI 相关性评分
+- `relevant`：符合相关性阈值
+- `reply_generated`：AI 回复已创建
+- `reply_approved`：人工批准
+- `published`：已发布到社交媒体
+- `ignored`：人工跳过
 
-**Q: What if n8n isn't available?**  
-A: Any HTTP client can call KaiTian APIs. Use curl, Postman, or build your own orchestration layer.
+### 关注点分离
 
-**Q: How do I extend this?**  
-A: Add more POST /crawl/* endpoints for other platforms. Add more PATCH /posts endpoints for additional metadata.
+| 组件 | 责任 |
+|------|------|
+| **KaiTian** | 抓取帖子、存储数据、提供 API |
+| **n8n** | 编排、AI 分析、人工流程、直接 API 调用 |
 
-**Q: Is SQLite sufficient?**  
-A: Yes for MVP. For 1000s of posts/day, consider PostgreSQL.
+这使 KaiTian 保持轻量级，并让 n8n 做它最擅长的事情：工作流自动化。
+
+---
+
+## 常见问题
+
+**Q: 我需要 Crawl4AI 吗？**  
+A: 是的，用于 JavaScript 渲染的内容。对于简单的 HTML，你可以使用任何 HTTP 客户端。
+
+**Q: KaiTian 可以直接发布到 Reddit 吗？**  
+A: 不行。KaiTian 存储和检索数据。n8n 通过社交媒体 API 直接编排发布。
+
+**Q: 如果 n8n 不可用怎么办？**  
+A: 任何 HTTP 客户端都可以调用 KaiTian API。使用 curl、Postman 或构建你自己的编排层。
+
+**Q: 我如何扩展它？**  
+A: 为其他平台添加更多 POST /crawl/* 端点。为其他元数据添加更多 PATCH /posts 端点。
+
+**Q: SQLite 足够吗？**  
+A: 是的，对于 MVP。对于每天有 1000 个以上帖子的情况，请考虑使用 PostgreSQL。
 
 ---
 
@@ -359,7 +417,7 @@ A: Yes for MVP. For 1000s of posts/day, consider PostgreSQL.
 - **[N8N_INTEGRATION.md](docs/N8N_INTEGRATION.md)** - n8n 工作流集成指南
 
 ### 启动和部署
-- **[STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md)** - 快速启动指南（中文）
+- **[STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md)** - 快速启动指南
 - **[STARTUP_SCRIPTS.md](docs/STARTUP_SCRIPTS.md)** - 启动脚本技术文档
 - **[DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)** - Docker 部署指南
 - **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** - 快速参考卡
@@ -370,66 +428,77 @@ A: Yes for MVP. For 1000s of posts/day, consider PostgreSQL.
 
 ---
 
-### Run Locally
+## 本地运行
 
 ```bash
-# Install
-uv pip install -r requirements.txt
+# 安装
+pip install -r requirements.txt
 
-# Run with debug
+# 以调试模式运行
 KAITIAN_DEBUG=true python main.py
 
-# Test
+# 测试
 curl http://localhost:8000/health
 ```
 
-### Project Structure
+## 项目结构
 
 ```
 kaitian/
 ├── app/
-│   ├── api/routes.py       # API endpoints
-│   ├── core/               # Config, database, app setup
-│   ├── services/           # Business logic
-│   ├── integrations/       # External service clients
-│   └── models/             # Database models
-├── docker-compose.yml      # Local dev setup
-├── Dockerfile              # Production image
-└── main.py                 # Entry point
+│   ├── api/
+│   │   └── routes.py           # API 端点
+│   ├── core/                   # 配置、数据库、应用设置
+│   ├── services/               # 业务逻辑
+│   │   ├── content_generation.py    # LangChain 内容生成
+│   │   └── prompt_templates.py      # Prompt 模板
+│   ├── integrations/           # 外部服务客户端
+│   └── models/                 # 数据库模型
+├── docs/                       # 文档
+│   ├── LANGCHAIN_INTEGRATION.md
+│   ├── SYSTEM_DESIGN.md
+│   ├── N8N_INTEGRATION.md
+│   └── ...
+├── docker-compose.yml          # 本地开发设置
+├── Dockerfile                  # 生产镜像
+├── start.py                    # 启动脚本
+├── main.py                     # 入口点
+├── requirements.txt            # Python 依赖
+└── README.md                   # 本文件
 ```
 
 ---
 
-## Cost
+## 成本
 
-**$0 per month:**
-- No proprietary services
-- All open-source dependencies
-- SQLite (no DB costs)
-- Self-hosted
+**0 元/月：**
+- 无专有服务
+- 所有开源依赖
+- SQLite（无数据库成本）
+- 自托管
 
-**Optional costs:**
-- n8n (free self-hosted or paid cloud)
-- OpenAI/Claude for AI (pay-per-token)
-- Hosting infrastructure (your choice)
-
----
-
-## Next Steps
-
-1. **Setup:** `docker-compose up -d`
-2. **Test API:** `curl http://localhost:8000/health`
-3. **Build workflow:** Check n8n integration guide
-4. **Monitor:** Check logs and database queries
+**可选成本：**
+- n8n（免费自托管或付费云）
+- OpenAI/Claude 用于 AI（按使用量付费）
+- 托管基础设施（你的选择）
 
 ---
 
-## Support & Feedback
+## 下一步
 
-- Found a bug? Open an issue
-- Have a feature request? Contribute!
-- Need help? See docs/ folder for detailed guides
+1. **设置：** `docker-compose up -d`
+2. **测试 API：** `curl http://localhost:8000/health`
+3. **构建工作流：** 查看 n8n 集成指南
+4. **监控：** 检查日志和数据库查询
 
 ---
 
-**Ready to automate?** Start with Docker Compose, build your first n8n workflow, and publish your first reply in minutes.
+## 支持和反馈
+
+- 发现错误？开启一个 issue
+- 有功能请求？贡献代码！
+- 需要帮助？查看 docs/ 文件夹获取详细指南
+
+---
+
+**准备好自动化了吗？** 使用 Docker Compose 开始，构建你的第一个 n8n 工作流，在几分钟内发布你的第一条回复。
