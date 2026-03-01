@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "kaitian"
 version = "0.1.0"
@@ -16,12 +20,13 @@ dependencies = [
     "alembic>=1.13.0",
     "praw>=7.7.0",
     "tenacity>=8.2.0",
-    "crawl4ai>=0.3.0",
-    "media-crawler>=1.0.0",
     "python-json-logger>=2.0.0",
 ]
 
 [project.optional-dependencies]
+crawlers = [
+    "crawl4ai>=0.3.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -31,6 +36,9 @@ dev = [
     "mypy>=1.7.0",
     "ipython>=8.18.0",
 ]
+
+[tool.setuptools]
+packages = ["app"]
 
 [tool.black]
 line-length = 100

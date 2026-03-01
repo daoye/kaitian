@@ -24,16 +24,18 @@ class Settings(BaseSettings):
     database_echo: bool = False
 
     # Reddit API
-    reddit_client_id: str
-    reddit_client_secret: str
-    reddit_user_agent: str
+    reddit_client_id: Optional[str] = None
+    reddit_client_secret: Optional[str] = None
+    reddit_user_agent: Optional[str] = None
 
     # AI Service
-    ai_api_key: str
-    ai_api_url: str
+    ai_api_key: Optional[str] = None
+    ai_api_url: Optional[str] = None
 
     # External Services
     postiz_api_key: Optional[str] = None
+    postiz_reddit_integration_id: Optional[str] = None
+    postiz_twitter_integration_id: Optional[str] = None
     linu_api_key: Optional[str] = None
     n8n_webhook_url: Optional[str] = None
 
