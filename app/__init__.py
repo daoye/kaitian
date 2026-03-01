@@ -1,0 +1,1 @@
+"""KaiTian main application module."""
