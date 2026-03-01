@@ -1,376 +1,322 @@
-## 开天(KaiTian)
+# KaiTian - AI Marketing Automation Engine
 
-基于 n8n + Linu + Postiz + Crawl4AI + MediaCrawler + FastAPI 的 AI 产品营销自动化 MVP 系统
-
----
-
-## 1. 项目背景
-
-本项目旨在构建一个低成本、快速验证的产品营销自动化系统。系统通过监控社交媒体中的目标关键词内容，利用 AI 判断相关性并生成回复或帖子，通过人工审核后自动发布，从而实现半自动化的产品推广与用户获取。
-
-系统采用以下核心组件：
-
-n8n: 以n8n 为用户操作界面和流程编排工具
-linu: 移动端消息中心与人工交互入口
-Postiz: 作为部分社交媒体的集成内容发布平台
-MediaCrawler: 部分社交媒体的数据抓取、内容发布工具，补充Postiz
-Crawl4AI: 自定义爬虫框架，用来开发自定义爬虫，作为Postiz 和MediaCrawler的补充
-FastAPI: 公布API 给N8N使用
-
-本系统优先实现 MVP，用于验证营销自动化的可行性与转化效果。
+**Find marketing opportunities in real-time. Let AI generate replies. You approve. We publish.**
 
 ---
 
-## 2. 项目目标
+## What is KaiTian?
 
-### 2.1 核心目标
+KaiTian is a lightweight backend service that powers AI-driven marketing automation. It finds relevant posts on social media, stores them efficiently, and provides simple APIs for orchestration tools like n8n to build complete marketing workflows.
 
-构建一个可运行的自动化营销系统，实现：
-
-- 自动监控目标关键词相关帖子
-- 自动识别潜在营销机会
-- 自动生成营销回复或内容
-- 提供人工审核与控制能力
-- 支持一键发布到社交媒体平台
+**Core value:** Reduce time-to-reply from hours to seconds. Find 5+ relevant posts daily. Never miss a marketing opportunity again.
 
 ---
 
-### 2.2 MVP 成功标准
+## Architecture: Simple & Modular
 
-系统上线后满足以下条件：
+```
+Your Marketing Workflow (n8n/Zapier/Custom)
+        ↓
+    KaiTian API
+    ├─ Crawl posts
+    ├─ Store data
+    └─ Publish replies
+        ↓
+   Social Media
+   (Reddit, Twitter, etc.)
+```
 
-- 每日可发现 ≥ 5 条相关帖子
-- 人工审核和发布流程完整可用
-- 每条回复操作时间 ≤ 10 秒
-- 系统可稳定运行 ≥ 7 天
+**KaiTian does one thing well:** Crawl, store, and manage marketing posts via API.
 
----
-
-## 3. 系统范围
-
-### 3.1 包含范围
-
-- Reddit 帖子监控
-- AI 内容相关性判断
-- AI 回复生成
-- Linu 消息通知与交互
-- Postiz 草稿创建与发布
-- 人工审核流程
+**n8n orchestrates everything else:** Relevance scoring, AI reply generation, human review, publishing.
 
 ---
 
-### 3.2 不包含范围（MVP阶段）
+## Features
 
-- 完全自动发布（必须人工确认）
-- 多账号管理
-- 高级数据分析
-- 用户管理系统
-- UI 后台系统
+✅ **Post Discovery**
+- Find posts containing your keywords on Reddit
+- Crawl any URL with JavaScript rendering support
+- Automatic full-text storage
 
----
+✅ **Data Management**
+- Query posts by status, platform, or date
+- Track post lifecycle (pending → fetched → analyzed → published)
+- SQLite database included
 
-## 4. 用户角色
+✅ **Simple API**
+- 3 core endpoints: Crawl, Query, Update
+- JSON request/response
+- Designed for n8n HTTP nodes
 
-### 4.1 系统操作者（唯一角色）
-
-权限：
-
-- 接收 Linu 通知
-- 查看 AI 生成内容
-- 决定是否发布
-- 触发发布操作
-
----
-
-## 5. 系统架构概览
-
-系统由三个核心模块组成：
-
-### 5.1 自动化引擎
-
-使用 n8n 实现：
-
-- 定时触发任务
-- 抓取社交媒体内容
-- 调用 AI 分析
-- 调用 AI 生成回复
-- 发送通知
-- 调用 Postiz API
+✅ **Production-Ready**
+- Docker & Docker Compose included
+- Environment-based configuration
+- Health check endpoint
 
 ---
 
-### 5.2 消息交互模块
+## Quick Start
 
-使用 Linu 实现：
+### Using Docker (Recommended)
 
-- 接收营销机会通知
-- 显示帖子内容
-- 显示 AI 建议回复
-- 提供操作按钮：
+```bash
+docker-compose up -d
+```
 
-操作包括：
+Then:
+- API available at `http://localhost:8000/api/v1`
+- API docs at `http://localhost:8000/docs`
 
-- 发布
-- 忽略
-- 重新生成
+### Local Setup
 
----
+```bash
+# Install dependencies with uv (or pip)
+uv pip install -r requirements.txt
 
-### 5.3 发布执行模块
-
-使用 Postiz 实现：
-
-- 接收发布请求
-- 创建草稿或直接发布
-- 管理社交媒体账号
-- 执行发布操作
-
-### 5.4 API
-
-使用 FastAPI 实现：
-
-- 启动轻量api服务
-- 将相关能力通过API公布给n8n
-- N8N调用API执行相关能力
+# Run
+python main.py
+```
 
 ---
 
-## 6. 功能需求
+## API Overview
+
+### 1. Crawl Posts
+
+```bash
+POST /api/v1/crawl/url
+Content-Type: application/json
+
+{
+  "url": "https://example.com",
+  "store_to_db": true
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "url": "https://example.com",
+  "content": "# Extracted content in Markdown",
+  "extracted_data": {...}
+}
+```
+
+### 2. List Posts
+
+```bash
+GET /api/v1/posts?status=pending&limit=10
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "total": 8,
+  "posts": [
+    {
+      "id": "uuid",
+      "title": "...",
+      "content": "...",
+      "status": "pending",
+      "created_at": "2024-03-01T10:00:00"
+    }
+  ]
+}
+```
+
+### 3. Update Post
+
+```bash
+PATCH /api/v1/posts/{post_id}
+
+{
+  "status": "analyzed",
+  "relevance_score": 0.85,
+  "generated_reply": "Great post!"
+}
+```
 
 ---
 
-## 6.1 关键词管理
+## Example n8n Workflow
 
-系统必须支持：
+```
+Schedule (every 30 min)
+  ↓
+POST /api/v1/crawl/url
+  ↓
+For Each Post:
+  ├─ Call OpenAI for relevance scoring
+  ├─ PATCH /api/v1/posts/{id}
+  ├─ IF relevant:
+  │   ├─ Generate reply
+  │   ├─ PATCH /api/v1/posts/{id}
+  │   └─ Send Slack notification
+  └─ Wait for human approval
+  ↓
+If approved:
+  └─ Call social media API to reply
+```
 
-- 定义关键词列表
-- 关键词可配置
-- 系统根据关键词搜索帖子
-
-关键词示例：
-
-- automation
-- marketing automation
-- zapier alternative
-- workflow automation
-
-关键词存储方式：
-
-- n8n 内部配置或简单数据库
-
----
-
-## 6.2 帖子抓取
-
-系统必须：
-
-- 定时执行抓取任务
-- 默认执行频率：每 30 分钟
-
-抓取内容包括：
-
-- 帖子标题
-- 帖子正文
-- 帖子 URL
-- 作者名称
-- 发布时间
-
-来源平台（MVP）：
-
-- Reddit
+See [docs/N8N_INTEGRATION.md](docs/N8N_INTEGRATION.md) for detailed examples.
 
 ---
 
-## 6.3 AI 相关性判断
+## Environment Configuration
 
-系统必须：
+Create `.env` file:
 
-- 将帖子发送给 AI 模型
-- 判断帖子是否与产品相关
+```env
+# KaiTian Core
+KAITIAN_API_URL=http://localhost:8000
+KAITIAN_DEBUG=false
 
-AI 输出必须包含：
+# Search Keywords (comma-separated)
+SEARCH_KEYWORDS=automation,marketing,workflow
 
-- 是否相关（true/false）
-- 原因说明
+# Crawl4AI
+CRAWL4AI_API_URL=http://localhost:11235
 
-系统必须：
+# Database
+DATABASE_URL=sqlite:///./kaitian.db
+```
 
-- 仅处理相关帖子
-- 忽略不相关帖子
-
----
-
-## 6.4 AI 回复生成
-
-对于相关帖子，系统必须：
-
-- 自动生成回复内容
-
-回复要求：
-
-- 内容自然
-- 提供帮助
-- 避免明显广告语气
-- 长度不超过 100 字
-
-生成内容包括：
-
-- 回复文本
+See `.env.example` for all options.
 
 ---
 
-## 6.5 Linu 通知
+## Deployment
 
-系统必须通过 Linu 发送通知。
+### Docker Compose (Local Dev)
 
-通知必须包含：
+```bash
+docker-compose up -d
+```
 
-- 帖子标题
-- 帖子内容摘要
-- 帖子链接
-- AI 生成回复
+Includes:
+- KaiTian API service
+- Crawl4AI service
 
-通知必须包含操作按钮：
+### Production
 
-- 发布
-- 忽略
-- 重新生成
+1. Build: `docker build -t kaitian:latest .`
+2. Deploy container with environment variables
+3. Mount volume for SQLite database persistence
+4. Set `KAITIAN_DEBUG=false`
 
----
-
-## 6.6 人工审核
-
-操作者必须能够：
-
-- 在手机上查看通知
-- 查看 AI 回复
-- 决定是否发布
-
-系统必须等待人工操作。
-
-未经人工批准，不得发布。
+See [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md) for details.
 
 ---
 
-## 6.7 Postiz 发布
+## Key Concepts
 
-当用户点击“发布”时：
+### Post Status Lifecycle
 
-系统必须：
+Posts move through stages:
+- `pending`: Initial crawl
+- `fetched`: Retrieved from source
+- `analyzed`: AI relevance scored
+- `relevant`: Meets relevance threshold
+- `reply_generated`: AI reply created
+- `reply_approved`: Human approved
+- `published`: Posted to social media
+- `ignored`: Skipped by human
 
-- 调用 Postiz API
-- 创建草稿或发布帖子
+### Separation of Concerns
 
-发布内容包括：
+| Component | Responsibility |
+|-----------|-----------------|
+| **KaiTian** | Crawl posts, store data, provide API |
+| **n8n** | Orchestration, AI analysis, human flow, direct API calls |
 
-- 回复文本
-- 目标平台
-- 目标帖子链接
-
----
-
-## 7. 工作流程
-
-完整流程如下：
-
-1. n8n 定时启动
-2. 搜索 Reddit 帖子
-3. 获取帖子内容
-4. 调用 AI 判断相关性
-5. 如果相关，调用 AI 生成回复
-6. 发送通知到 Linu
-7. 用户点击发布
-8. n8n 接收发布指令
-9. 调用 Postiz API
-10. Postiz 发布内容
+This keeps KaiTian lightweight and lets n8n do what it does best: workflow automation.
 
 ---
 
-## 8. 非功能需求
+## FAQ
+
+**Q: Do I need Crawl4AI?**  
+A: Yes for JavaScript-rendered content. For simple HTML, you can use any HTTP client.
+
+**Q: Can KaiTian publish directly to Reddit?**  
+A: No. KaiTian stores and retrieves data. n8n orchestrates publishing via social media APIs directly.
+
+**Q: What if n8n isn't available?**  
+A: Any HTTP client can call KaiTian APIs. Use curl, Postman, or build your own orchestration layer.
+
+**Q: How do I extend this?**  
+A: Add more POST /crawl/* endpoints for other platforms. Add more PATCH /posts endpoints for additional metadata.
+
+**Q: Is SQLite sufficient?**  
+A: Yes for MVP. For 1000s of posts/day, consider PostgreSQL.
 
 ---
 
-### 8.1 成本要求
+## Development
 
-MVP 阶段必须：
+### Run Locally
 
-- 软件成本为 0
-- 使用开源或免费服务
-- 使用自托管组件
+```bash
+# Install
+uv pip install -r requirements.txt
 
----
+# Run with debug
+KAITIAN_DEBUG=true python main.py
 
-### 8.2 性能要求
+# Test
+curl http://localhost:8000/health
+```
 
-系统必须：
+### Project Structure
 
-- 支持每小时处理 ≥ 50 个帖子
-- 单次流程执行时间 ≤ 30 秒
-
----
-
-### 8.3 安全要求
-
-系统必须：
-
-- 不自动发布未经审核内容
-- 不存储敏感用户凭据明文
-
----
-
-### 8.4 可扩展性
-
-系统架构必须支持未来扩展：
-
-- Twitter
-- LinkedIn
-- 多关键词
-- 多账号
+```
+kaitian/
+├── app/
+│   ├── api/routes.py       # API endpoints
+│   ├── core/               # Config, database, app setup
+│   ├── services/           # Business logic
+│   ├── integrations/       # External service clients
+│   └── models/             # Database models
+├── docker-compose.yml      # Local dev setup
+├── Dockerfile              # Production image
+└── main.py                 # Entry point
+```
 
 ---
 
-## 9. 成功指标
+## Cost
 
-系统上线后需跟踪：
+**$0 per month:**
+- No proprietary services
+- All open-source dependencies
+- SQLite (no DB costs)
+- Self-hosted
 
-- 每日发现帖子数量
-- 每日发布数量
-- 回复率
-- 用户互动数量
-
----
-
-## 10. MVP 验收标准
-
-MVP 完成必须满足：
-
-- n8n 可自动抓取 Reddit 帖子
-- AI 可生成回复
-- Linu 可接收通知
-- 用户可点击发布
-- Postiz 可成功发布
+**Optional costs:**
+- n8n (free self-hosted or paid cloud)
+- OpenAI/Claude for AI (pay-per-token)
+- Hosting infrastructure (your choice)
 
 ---
 
-## 11. 后续扩展方向（非 MVP）
+## Next Steps
 
-未来可扩展：
-
-- 自动发布（无需人工审核）
-- 多平台支持
-- 数据分析模块
-- Web 管理后台
-- 多用户支持
+1. **Setup:** `docker-compose up -d`
+2. **Test API:** `curl http://localhost:8000/health`
+3. **Build workflow:** Check n8n integration guide
+4. **Monitor:** Check logs and database queries
 
 ---
 
-## 12. 总结
+## Support & Feedback
 
-本项目构建一个基于自动化与 AI 的营销执行系统，实现：
+- Found a bug? Open an issue
+- Have a feature request? Contribute!
+- Need help? See docs/ folder for detailed guides
 
-- 自动发现营销机会
-- 自动生成营销内容
-- 人工控制发布
-- 自动执行发布
+---
 
-该系统用于快速验证自动化营销策略的有效性，并为后续产品化提供基础。
+**Ready to automate?** Start with Docker Compose, build your first n8n workflow, and publish your first reply in minutes.

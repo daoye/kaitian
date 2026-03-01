@@ -1,27 +1,30 @@
-# Core dependencies
+# KaiTian Requirements
+# Use: pip install -r requirements.txt
+# Or use: uv pip install -r requirements.txt
+
+# Core Framework
 fastapi>=0.104.0
-uvicorn>=0.24.0
+uvicorn[standard]>=0.24.0
+
+# Data Validation
 pydantic>=2.0
 pydantic-settings>=2.0
+
+# Environment
 python-dotenv>=1.0.0
-aiohttp>=3.9.0
+
+# HTTP Client
 httpx>=0.25.0
+
+# Database
 sqlalchemy>=2.0
-alembic>=1.13.0
-praw>=7.7.0
-tenacity>=8.2.0
+
+# Logging
 python-json-logger>=2.0.0
 
-# Web crawling and scraping
-crawl4ai>=0.3.0
-media-crawler>=1.0.0
-
-# Development dependencies
+# Development
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
 black>=23.12.0
 ruff>=0.1.0
 mypy>=1.7.0
-ipython>=8.18.0
-

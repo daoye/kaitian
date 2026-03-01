@@ -23,31 +23,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./kaitian.db"
     database_echo: bool = False
 
-    # Reddit API
-    reddit_client_id: Optional[str] = None
-    reddit_client_secret: Optional[str] = None
-    reddit_user_agent: Optional[str] = None
-
-    # AI Service
-    ai_api_key: Optional[str] = None
-    ai_api_url: Optional[str] = None
-
-    # External Services
-    postiz_api_key: Optional[str] = None
-    postiz_reddit_integration_id: Optional[str] = None
-    postiz_twitter_integration_id: Optional[str] = None
-    linu_api_key: Optional[str] = None
-    n8n_webhook_url: Optional[str] = None
-
-    # Crawl4AI Configuration
+    # Crawl4AI Configuration (API-based)
     crawl4ai_enabled: bool = True
+    crawl4ai_api_url: Optional[str] = None  # Defaults to http://localhost:8001
     crawl4ai_timeout: int = 30
-    crawl4ai_browser_type: str = "chromium"
-
-    # MediaCrawler Configuration
-    media_crawler_enabled: bool = True
-    media_crawler_timeout: int = 30
-    media_crawler_max_retries: int = 3
 
     # Search Configuration
     search_keywords: str = "python,programming,automation"

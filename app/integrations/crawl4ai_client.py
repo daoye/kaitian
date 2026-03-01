@@ -1,33 +1,30 @@
-"""Crawl4AI integration module for web scraping with AI-powered extraction."""
+"""Crawl4AI HTTP API client for web scraping with AI-powered extraction."""
 
 from typing import Optional, Dict, Any
-import asyncio
+import httpx
 from app.core.config import get_settings
 from app.core.logging import get_logger
-import json
 
 logger = get_logger(__name__)
 
 
 class Crawl4AIClient:
-    """Client for Crawl4AI web scraping service."""
+    """Client for Crawl4AI HTTP API."""
 
-    def __init__(self):
-        """Initialize Crawl4AI client with settings."""
-        self.settings = get_settings()
-        self.enabled = self.settings.crawl4ai_enabled
-        self.timeout = self.settings.crawl4ai_timeout
-        self.browser_type = self.settings.crawl4ai_browser_type
+    def __init__(self, api_url: Optional[str] = None, timeout: int = 30):
+        """Initialize Crawl4AI API client.
 
-        if self.enabled:
-            try:
-                from crawl4ai import AsyncWebCrawler
+        Args:
+            api_url: Crawl4AI API base URL. Defaults to CRAWL4AI_API_URL from settings.
+            timeout: Request timeout in seconds.
+        """
+        settings = get_settings()
+        self.api_url = api_url or settings.crawl4ai_api_url or "http://localhost:8001"
+        self.timeout = timeout
+        self.enabled = settings.crawl4ai_enabled
 
-                self.AsyncWebCrawler = AsyncWebCrawler
-                logger.info("Crawl4AI client initialized successfully")
-            except ImportError:
-                logger.warning("Crawl4AI not installed, disabling Crawl4AI features")
-                self.enabled = False
+        if not self.enabled:
+            logger.warning("Crawl4AI is disabled via configuration")
 
     async def crawl(
         self,
@@ -36,7 +33,7 @@ class Crawl4AIClient:
         wait_for_selector: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Crawl a URL using Crawl4AI.
+        Crawl a URL using Crawl4AI API.
 
         Args:
             url: Target URL to crawl
@@ -49,42 +46,48 @@ class Crawl4AIClient:
             - content: str (markdown formatted)
             - raw_html: str
             - extracted_data: dict
+            - status_code: int
             - error: str (if failed)
         """
         if not self.enabled:
-            logger.warning("Crawl4AI is disabled")
-            return {"success": False, "error": "Crawl4AI is disabled"}
+            return {"success": False, "error": "Crawl4AI is disabled", "url": url}
 
         try:
-            logger.info(f"Starting Crawl4AI crawl for URL: {url}")
+            logger.info(f"Calling Crawl4AI API for URL: {url}")
 
-            async with self.AsyncWebCrawler(
-                browser_type=self.browser_type, timeout=self.timeout
-            ) as crawler:
-                result = await crawler.arun(
-                    url=url,
-                    wait_for_selector=wait_for_selector,
-                    extraction_schema=extraction_schema,
+            payload = {
+                "url": url,
+                "wait_for_selector": wait_for_selector,
+                "extraction_schema": extraction_schema,
+            }
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.api_url}/crawl",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
                 )
 
-                crawl_result = {
-                    "success": result.success,
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"Crawl4AI crawl completed successfully for {url}")
+                return result
+            else:
+                error_msg = f"Crawl4AI API error {response.status_code}: {response.text}"
+                logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error": error_msg,
                     "url": url,
-                    "content": result.markdown,
-                    "raw_html": result.html,
-                    "extracted_data": result.extracted_content,
-                    "status_code": result.status_code,
+                    "status_code": response.status_code,
                 }
 
-                logger.info(f"Crawl4AI crawl completed successfully for {url}")
-                return crawl_result
-
-        except asyncio.TimeoutError:
-            error_msg = f"Crawl4AI timeout after {self.timeout}s for {url}"
+        except httpx.TimeoutException:
+            error_msg = f"Crawl4AI API timeout after {self.timeout}s for {url}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg, "url": url}
         except Exception as e:
-            error_msg = f"Crawl4AI crawl failed for {url}: {str(e)}"
+            error_msg = f"Crawl4AI API call failed for {url}: {str(e)}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg, "url": url}
 
@@ -124,9 +127,12 @@ class Crawl4AIClient:
         Returns:
             List of crawl results
         """
-        logger.info(f"Starting concurrent crawl for {len(urls)} URLs")
+        logger.info(f"Starting concurrent crawl for {len(urls)} URLs via API")
 
         tasks = [self.crawl(url, **kwargs) for url in urls]
+
+        import asyncio
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         crawl_results = []
