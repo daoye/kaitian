@@ -14,8 +14,8 @@ WORKDIR /build
 COPY pyproject.toml requirements.txt* ./
 
 # Create virtual environment and install dependencies
-RUN uv venv /opt/venv && \
-    /opt/venv/bin/uv pip install -r requirements.txt
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Final stage
 FROM python:3.11-slim
