@@ -31,8 +31,8 @@ from app.services.content_generation import (
     get_content_generation_service,
 )
 from app.services.keyword_service import keyword_service
-from app.services.social_media_service import social_media_service
-from app.services.ai_service import ai_service
+from app.services.social_media_crawler import social_media_crawler_service
+from app.services.langchain_agent import langchain_agent_service
 from app.services.notification_service import notification_service, publish_service
 from app.models.schemas import (
     KeywordUniverseCreate,
@@ -526,20 +526,26 @@ async def create_keywords_universe(request: KeywordUniverseCreate, db: Session =
 
 @router.post("/search/social-media", response_model=SocialSearchResponse)
 async def search_social_media(request: SocialSearchRequest, db: Session = Depends(get_db)):
+    """实时爬取社交媒体内容（不是从数据库查询）。
+
+    这是核心业务流程：
+    1. n8n 根据关键词循环调用此 API
+    2. API 使用 crawl4ai 实时爬取社交媒体页面
+    3. 返回爬取的帖子内容
+    """
     try:
-        result = social_media_service.search_multiple_platforms(
+        result = await social_media_crawler_service.crawl_with_crawl4ai(
             db=db,
             keyword=request.keyword,
             platforms=request.platforms,
-            limit_per_platform=request.limit_per_page or 10,
-            pages=request.pages or 3,
+            max_results=request.limit_per_page or 10,
         )
         return SocialSearchResponse(
             success=True,
             search_id=result.get("search_id"),
             keyword=result.get("keyword"),
             total_results=result.get("total_results"),
-            results_per_platform=result.get("results_per_platform"),
+            results_per_platform={"all": result.get("posts", [])},
         )
     except Exception as e:
         logger.error(f"Social media search failed: {str(e)}")
@@ -548,20 +554,29 @@ async def search_social_media(request: SocialSearchRequest, db: Session = Depend
 
 @router.post("/ai/evaluate-relevance")
 async def evaluate_relevance(
-    post_id: str, content: str, product_description: str, db: Session = Depends(get_db)
+    post_id: str,
+    content: str,
+    product_description: str,
+    language: str = "zh",
+    db: Session = Depends(get_db),
 ):
+    """使用 LangChain Agent 评判内容相关性（支持中英文）。"""
     try:
-        result = ai_service.evaluate_relevance(
-            db=db, post_id=post_id, content=content, product_description=product_description
+        result = langchain_agent_service.evaluate_relevance(
+            db=db,
+            post_id=post_id,
+            content=content,
+            product_description=product_description,
+            language=language,
         )
         return {
             "success": True,
             "post_id": post_id,
-            "is_relevant": result.is_relevant,
-            "relevance_score": result.score,
-            "confidence": result.confidence,
-            "reasoning": result.reasoning,
-            "suggested_angle": result.suggested_angle,
+            "is_relevant": result.get("is_relevant", False),
+            "relevance_score": result.get("score", 0.0),
+            "confidence": result.get("confidence", 0.0),
+            "reasoning": result.get("reasoning", ""),
+            "suggested_angle": result.get("suggested_angle"),
         }
     except Exception as e:
         logger.error(f"Evaluate relevance failed: {str(e)}")
@@ -574,19 +589,19 @@ async def generate_reply(
     original_content: str,
     platform: str = "reddit",
     tone: str = "professional",
+    language: str = "zh",
     db: Session = Depends(get_db),
 ):
+    """使用 LangChain Agent 生成回复（支持中英文）。"""
     try:
-        product_info = (
-            get_settings().product_info if hasattr(get_settings(), "product_info") else None
-        )
-        result = ai_service.generate_reply(
+        result = langchain_agent_service.generate_reply(
             db=db,
             post_id=post_id,
             original_content=original_content,
             platform=platform,
             tone=tone,
-            product_info=product_info,
+            language=language,
+            product_info=None,  # 可以从环境变量获取
         )
         return result
     except Exception as e:
