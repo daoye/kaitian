@@ -44,8 +44,15 @@ Your Marketing Workflow (n8n/Zapier/Custom)
 - Track post lifecycle (pending → fetched → analyzed → published)
 - SQLite database included
 
+✅ **AI 内容生成** (LangChain)
+- 使用 GPT-4/Claude 生成营销文章
+- 支持多种语言和语气风格
+- SEO 优化和关键词分析
+- 内容质量评分
+
 ✅ **Simple API**
-- 3 core endpoints: Crawl, Query, Update
+- Crawl, Query, Update endpoints
+- Content generation endpoints (新增)
 - JSON request/response
 - Designed for n8n HTTP nodes
 
@@ -53,12 +60,33 @@ Your Marketing Workflow (n8n/Zapier/Custom)
 - Docker & Docker Compose included
 - Environment-based configuration
 - Health check endpoint
+- Comprehensive logging and monitoring
 
 ---
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### 方式 1: 使用启动脚本（推荐）
+
+```bash
+# 启动所有服务（KaiTian + MediaCrawler + Postiz）
+python start.py
+
+# 只启动 KaiTian
+python start.py --only kaitian
+
+# 查看帮助
+python start.py --help
+```
+
+**启动脚本会自动**:
+- ✅ 创建 Python 虚拟环境（如果不存在）
+- ✅ 克隆相关仓库（如果不存在）
+- ✅ 安装所有依赖
+
+详见：[docs/STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md)
+
+### 方式 2: 使用 Docker（推荐用于生产）
 
 ```bash
 docker-compose up -d
@@ -68,13 +96,19 @@ Then:
 - API available at `http://localhost:8000/api/v1`
 - API docs at `http://localhost:8000/docs`
 
-### Local Setup
+### 方式 3: 手动启动
 
 ```bash
-# Install dependencies with uv (or pip)
-uv pip install -r requirements.txt
+# 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+# 或
+venv\Scripts\activate     # Windows
 
-# Run
+# 安装依赖
+pip install -r requirements.txt
+
+# 运行
 python main.py
 ```
 
@@ -139,6 +173,42 @@ PATCH /api/v1/posts/{post_id}
 }
 ```
 
+### 4. Generate Article (LangChain)
+
+```bash
+POST /api/v1/generate/article
+Content-Type: application/json
+
+{
+  "topic": "AI 在营销中的应用",
+  "keywords": ["AI", "营销", "自动化"],
+  "tone": "professional",
+  "length": "medium",
+  "language": "zh",
+  "target_audience": "营销团队"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "content": {
+    "title": "AI 如何改变现代营销...",
+    "body": "# AI 如何改变现代营销\n\n...",
+    "summary": "本文探讨了 AI 在营销中的应用...",
+    "keywords": ["AI", "营销", "自动化"],
+    "word_count": 750,
+    "seo_score": 85.5
+  },
+  "metadata": {
+    "generation_time": 3.45,
+    "model": "gpt-4",
+    "tokens_used": 1250
+  }
+}
+```
+
 ---
 
 ## Example n8n Workflow
@@ -182,6 +252,32 @@ CRAWL4AI_API_URL=http://localhost:11235
 
 # Database
 DATABASE_URL=sqlite:///./kaitian.db
+
+# LangChain & AI 内容生成
+# LLM 提供商选择: openai, azure, anthropic, ollama
+LLM_PROVIDER=openai
+
+# OpenAI 配置
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-3.5-turbo
+OPENAI_TEMPERATURE=0.7
+
+# Azure OpenAI 配置 (可选)
+AZURE_OPENAI_KEY=your_azure_key
+AZURE_OPENAI_ENDPOINT=your_azure_endpoint
+AZURE_DEPLOYMENT_NAME=your_deployment
+
+# Anthropic Claude 配置 (可选)
+ANTHROPIC_API_KEY=your_anthropic_key
+
+# 内容生成配置
+CONTENT_GENERATION_MAX_TOKENS=2000
+CONTENT_GENERATION_TEMPERATURE=0.7
+CONTENT_GENERATION_TIMEOUT=30
+
+# Redis 缓存 (可选)
+REDIS_ENABLED=false
+REDIS_URL=redis://localhost:6379
 ```
 
 See `.env.example` for all options.
@@ -255,7 +351,24 @@ A: Yes for MVP. For 1000s of posts/day, consider PostgreSQL.
 
 ---
 
-## Development
+## 文档
+
+### 核心文档
+- **[LANGCHAIN_INTEGRATION.md](docs/LANGCHAIN_INTEGRATION.md)** - LangChain 集成详细指南，包括 API 设计、Prompt 工程、LLM 提供商配置
+- **[SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md)** - 完整的系统架构设计文档
+- **[N8N_INTEGRATION.md](docs/N8N_INTEGRATION.md)** - n8n 工作流集成指南
+
+### 启动和部署
+- **[STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md)** - 快速启动指南（中文）
+- **[STARTUP_SCRIPTS.md](docs/STARTUP_SCRIPTS.md)** - 启动脚本技术文档
+- **[DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)** - Docker 部署指南
+- **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** - 快速参考卡
+
+### 其他资源
+- **[PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)** - 项目结构说明
+- **[DATABASE_CRAWLER_INTEGRATION.md](docs/DATABASE_CRAWLER_INTEGRATION.md)** - 数据库和爬虫集成
+
+---
 
 ### Run Locally
 

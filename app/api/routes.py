@@ -23,6 +23,13 @@ from app.services.database_service import (
     create_search_session,
     complete_search_session,
 )
+from app.services.content_generation import (
+    ArticleGenerationRequest,
+    ArticleGenerationResponse,
+    SEOOptimizationRequest,
+    SEOOptimizationResponse,
+    get_content_generation_service,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["api"])
@@ -323,3 +330,148 @@ async def delete_post(post_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Delete post failed: {str(e)}")
         return {"success": False, "error": str(e)}
+
+
+# ============================================================================
+# 内容生成端点 (LangChain 集成)
+# ============================================================================
+
+
+@router.post("/generate/article", response_model=ArticleGenerationResponse)
+async def generate_article(request: ArticleGenerationRequest) -> ArticleGenerationResponse:
+    """生成营销文章。
+
+    使用 LangChain 和 LLM 生成高质量的营销文章。
+
+    Args:
+        request: 文章生成请求
+
+    Returns:
+        文章生成响应
+
+    Example:
+        ```bash
+        POST /api/v1/generate/article
+        {
+            "topic": "AI 在营销中的应用",
+            "keywords": ["AI", "营销", "自动化"],
+            "tone": "professional",
+            "length": "medium",
+            "language": "zh",
+            "target_audience": "营销团队"
+        }
+        ```
+    """
+    try:
+        service = get_content_generation_service()
+        result = await service.generate_article(request)
+
+        logger.info(
+            f"文章生成完成: {request.topic} "
+            f"(字数: {result.content.word_count if result.content else 0}, "
+            f"耗时: {result.metadata.get('generation_time', 0)}s)"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"文章生成请求处理失败: {str(e)}")
+        return ArticleGenerationResponse(
+            success=False, error=f"服务器错误: {str(e)}", error_code="SERVER_ERROR"
+        )
+
+
+@router.post("/generate/articles/batch")
+async def generate_articles_batch(requests: List[ArticleGenerationRequest]):
+    """批量生成文章。
+
+    同时生成多篇文章。
+
+    Args:
+        requests: 文章生成请求列表
+
+    Returns:
+        文章生成结果列表
+    """
+    try:
+        service = get_content_generation_service()
+        results = []
+
+        for request in requests:
+            result = await service.generate_article(request)
+            results.append(result)
+            logger.info(f"批量生成进度: {len(results)}/{len(requests)}")
+
+        return {
+            "success": True,
+            "total": len(requests),
+            "completed": len([r for r in results if r.success]),
+            "articles": results,
+        }
+
+    except Exception as e:
+        logger.error(f"批量文章生成失败: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/generate/optimize", response_model=SEOOptimizationResponse)
+async def optimize_content(request: SEOOptimizationRequest) -> SEOOptimizationResponse:
+    """优化文章的 SEO 表现。
+
+    分析并优化现有文章的搜索引擎优化。
+
+    Args:
+        request: SEO 优化请求
+
+    Returns:
+        SEO 优化响应
+
+    Example:
+        ```bash
+        POST /api/v1/generate/optimize
+        {
+            "article": "文章内容...",
+            "keywords": ["关键词1", "关键词2"],
+            "language": "zh",
+            "target_audience": "一般用户"
+        }
+        ```
+    """
+    try:
+        service = get_content_generation_service()
+        result = await service.optimize_seo(request)
+
+        if result.success:
+            logger.info(f"SEO 优化完成: SEO 评分: {result.seo_score}/100")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"SEO 优化请求处理失败: {str(e)}")
+        return SEOOptimizationResponse(success=False, error=f"服务器错误: {str(e)}")
+
+
+@router.get("/generate/status")
+async def get_generation_status():
+    """获取内容生成服务状态。
+
+    Returns:
+        服务状态信息
+    """
+    try:
+        settings = get_settings()
+        service = get_content_generation_service()
+
+        return {
+            "success": True,
+            "service": "content_generation",
+            "status": "operational",
+            "llm_provider": settings.llm_provider,
+            "model": settings.openai_model if settings.llm_provider == "openai" else "unknown",
+            "cache_enabled": settings.content_generation_cache_enabled,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"获取服务状态失败: {str(e)}")
+        return {"success": False, "status": "error", "error": str(e)}
