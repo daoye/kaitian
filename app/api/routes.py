@@ -14,7 +14,6 @@ from app.models.schemas import HealthCheckResponse
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.database import get_db
-from app.integrations.crawl4ai_client import get_crawl4ai_client
 from app.services.database_service import (
     create_post,
     update_post_status,
@@ -117,9 +116,36 @@ async def crawl_url(
     """
     try:
         logger.info(f"Crawling URL: {url}")
-        client = get_crawl4ai_client()
 
-        result = await client.crawl(url=url, wait_for_selector=wait_for)
+        # 调用本地部署的 crawl4ai API
+        crawl4ai_url = get_settings().crawl4ai_api_url or "http://localhost:8001"
+        payload = {"urls": [url], "priority": 10}
+
+        import requests
+
+        response = requests.post(
+            f"{crawl4ai_url}/crawl",
+            json=payload,
+            timeout=30,
+        )
+
+        result = {}
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("results"):
+                result = {
+                    "success": True,
+                    "url": url,
+                    "content": data["results"][0].get("markdown", ""),
+                    "raw_html": data["results"][0].get("html", ""),
+                    "extracted_data": {},
+                    "status_code": 200,
+                }
+            elif data.get("task_id"):
+                # 异步任务，简化处理返回错误
+                result = {"success": False, "url": url, "error": "Async task not supported"}
+        else:
+            result = {"success": False, "url": url, "error": f"HTTP {response.status_code}"}
 
         # Optionally store result in database
         if store_to_db and result.get("success"):
