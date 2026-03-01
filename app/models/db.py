@@ -79,30 +79,6 @@ class Post(Base):
     analyzed_at = Column(DateTime, nullable=True)
 
 
-class SearchSession(Base):
-    """Search session model for tracking search operations."""
-
-    __tablename__ = "search_sessions"
-
-    id = Column(String(255), primary_key=True)
-    source_platform = Column(String(50), default=SourcePlatformEnum.REDDIT)
-    keywords = Column(String(1000), nullable=False)  # JSON-serialized list
-    query_params = Column(Text, nullable=True)  # JSON-serialized dict
-
-    # Results
-    total_posts_found = Column(Integer, default=0)
-    relevant_posts = Column(Integer, default=0)
-
-    # Status
-    status = Column(String(50), default="pending")
-    error_message = Column(Text, nullable=True)
-
-    # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    completed_at = Column(DateTime, nullable=True)
-    duration_seconds = Column(Float, nullable=True)
-
-
 class CrawlSession(Base):
     """Web crawl session model for tracking Crawl4AI and MediaCrawler operations."""
 
@@ -151,3 +127,179 @@ class ProcessingLog(Base):
 
     # Relationships
     post = relationship("Post", foreign_keys=[post_id])
+
+
+# ============================================================================
+# 新工作流相关的数据模型
+# ============================================================================
+
+
+class KeywordUniverse(Base):
+    """关键词宇宙 - 用户定义的关键词集合。"""
+
+    __tablename__ = "keyword_universes"
+
+    id = Column(String(255), primary_key=True)
+    name = Column(String(500), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    category = Column(String(100), nullable=True)
+    tags = Column(Text, nullable=True)  # JSON array
+    keywords = Column(Text, nullable=False)  # JSON array
+
+    # Metadata
+    is_active = Column(Boolean, default=True, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    search_sessions = relationship("SearchSession", back_populates="universe")
+
+
+class SocialMediaPost(Base):
+    """社交媒体帖子 - 从社交媒体平台爬取的内容。"""
+
+    __tablename__ = "social_media_posts"
+
+    id = Column(String(255), primary_key=True)
+    post_id = Column(String(500), nullable=False, unique=True, index=True)
+    platform = Column(String(50), nullable=False, index=True)  # reddit, twitter, linkedin
+    title = Column(String(1000), nullable=True)
+    content = Column(Text, nullable=False)
+    author = Column(String(255), nullable=True)
+    author_id = Column(String(255), nullable=True)
+    url = Column(String(1000), nullable=False)
+
+    # Engagement metrics
+    engagement = Column(Text, nullable=True)  # JSON: {upvotes, comments, shares, etc}
+
+    # AI evaluation
+    relevance_score = Column(Float, nullable=True)
+    is_relevant = Column(Boolean, nullable=True)
+    relevance_reasoning = Column(Text, nullable=True)
+    suggested_angle = Column(Text, nullable=True)
+
+    # Sentiment and intent analysis
+    sentiment = Column(String(50), nullable=True)  # positive, neutral, negative
+    intent = Column(String(100), nullable=True)  # product_evaluation, question, complaint, etc
+    urgency = Column(String(50), nullable=True)  # low, medium, high
+
+    # Original post metadata
+    created_at_original = Column(DateTime, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+    evaluated_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    generated_reply = relationship("GeneratedReply", back_populates="social_post", uselist=False)
+
+
+class GeneratedReply(Base):
+    """生成的回复 - AI 生成的针对性回复。"""
+
+    __tablename__ = "generated_replies"
+
+    id = Column(String(255), primary_key=True)
+    post_id = Column(String(255), ForeignKey("social_media_posts.id"), nullable=False)
+
+    # Reply content
+    original_reply = Column(Text, nullable=False)  # AI 初始生成的回复
+    current_reply = Column(Text, nullable=False)  # 用户可能编辑过的回复
+    reply_alternatives = Column(Text, nullable=True)  # JSON array of alternatives
+
+    # Quality metrics
+    confidence = Column(Float, nullable=True)
+    word_count = Column(Integer, nullable=True)
+    tone_match_score = Column(Float, nullable=True)
+
+    # Status
+    status = Column(
+        String(50), default="pending", index=True
+    )  # pending, approved, rejected, published
+    review_status = Column(String(50), nullable=True)  # pending_review, approved, rejected
+    user_notes = Column(Text, nullable=True)  # 用户在审核时添加的备注
+
+    # Publishing
+    published_url = Column(String(1000), nullable=True)
+    published_at = Column(DateTime, nullable=True)
+    publish_error = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    social_post = relationship("SocialMediaPost", back_populates="generated_reply")
+    review_notification = relationship("ReviewNotification", back_populates="reply", uselist=False)
+
+
+class ReviewNotification(Base):
+    """审核通知 - 推送到 LihuApp 的审核通知。"""
+
+    __tablename__ = "review_notifications"
+
+    id = Column(String(255), primary_key=True)
+    reply_id = Column(String(255), ForeignKey("generated_replies.id"), nullable=False)
+
+    # LihuApp integration
+    lihuo_message_id = Column(String(500), nullable=True)
+    lihuo_push_status = Column(String(50), nullable=True)  # sent, delivered, failed
+
+    # Status
+    status = Column(
+        String(50), default="pending", index=True
+    )  # sent, acknowledged, approved, rejected, expired, timeout
+    result = Column(String(50), nullable=True)  # approved, rejected
+
+    # Callback
+    callback_url = Column(String(1000), nullable=False)
+    callback_received = Column(Boolean, default=False)
+    callback_received_at = Column(DateTime, nullable=True)
+
+    # Expiration
+    expires_at = Column(DateTime, nullable=False)
+
+    # User feedback
+    user_notes = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    sent_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    reply = relationship("GeneratedReply", back_populates="review_notification")
+
+
+class SearchSession(Base):
+    """Search session model for tracking search operations."""
+
+    __tablename__ = "search_sessions"
+
+    id = Column(String(255), primary_key=True)
+    universe_id = Column(String(255), ForeignKey("keyword_universes.id"), nullable=True)
+    keyword = Column(String(500), nullable=False, index=True)
+    platforms = Column(Text, nullable=False)  # JSON array
+    pages = Column(Integer, default=3)
+
+    # Results
+    total_results = Column(Integer, default=0)
+    relevant_count = Column(Integer, default=0)
+
+    # Status
+    status = Column(String(50), default="pending", index=True)  # in_progress, completed, failed
+    error_message = Column(Text, nullable=True)
+
+    # Duration
+    duration_seconds = Column(Float, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    universe = relationship("KeywordUniverse", back_populates="search_sessions")

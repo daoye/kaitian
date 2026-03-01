@@ -359,3 +359,156 @@ def get_tone_description(tone: str) -> str:
         "friendly": "友好、亲切、易理解",
     }
     return tone_map.get(tone, "专业")
+
+
+# ============================================================================
+# 相关性评判 Prompt 模板
+# ============================================================================
+
+RELEVANCE_EVALUATION_PROMPT_ZH = """请评判以下社交媒体内容与产品的相关性。
+
+**要评判的内容：**
+{content}
+
+**产品信息：**
+产品名称：{product_name}
+产品描述：{product_description}
+
+**评判任务：**
+1. 判断这个内容是否与产品相关（是/否）
+2. 给出相关性评分（0-1，0表示完全不相关，1表示高度相关）
+3. 给出置信度（0-1，表示你对这个判断的确定程度）
+4. 提供评判理由（简明扼要，100字以内）
+5. 如果相关，建议如何回复这个内容
+
+**请以以下JSON格式输出结果：**
+{{
+  "is_relevant": true/false,
+  "score": 0.85,
+  "confidence": 0.92,
+  "reasoning": "内容讨论营销工具的选择，与我们的产品高度相关",
+  "suggested_angle": "突出产品的自动化功能和易用性",
+  "sentiment": "neutral/positive/negative",
+  "intent": "product_evaluation/question/complaint/comparison",
+  "urgency": "low/medium/high"
+}}
+"""
+
+RELEVANCE_EVALUATION_PROMPT_EN = """Please evaluate the relevance of the following social media content to the product.
+
+**Content to Evaluate:**
+{content}
+
+**Product Information:**
+Product Name: {product_name}
+Product Description: {product_description}
+
+**Evaluation Task:**
+1. Determine if this content is relevant to the product (yes/no)
+2. Provide a relevance score (0-1, where 0 is completely irrelevant and 1 is highly relevant)
+3. Provide confidence level (0-1, indicating your certainty about this judgment)
+4. Provide reasoning (concise, within 100 characters)
+5. If relevant, suggest how to reply to this content
+
+**Please output the result in the following JSON format:**
+{{
+  "is_relevant": true/false,
+  "score": 0.85,
+  "confidence": 0.92,
+  "reasoning": "The content discusses marketing tool selection, highly relevant to our product",
+  "suggested_angle": "Highlight the product's automation capabilities and ease of use",
+  "sentiment": "neutral/positive/negative",
+  "intent": "product_evaluation/question/complaint/comparison",
+  "urgency": "low/medium/high"
+}}
+"""
+
+
+# ============================================================================
+# 回复生成 Prompt 模板
+# ============================================================================
+
+REPLY_GENERATION_PROMPT_ZH = """请根据以下社交媒体内容，生成一个适当的回复。
+
+**原始内容：**
+{original_content}
+
+**回复要求：**
+- 平台：{platform}
+- 语气风格：{tone}
+- 最大字数：{max_length}
+
+**产品信息：**
+{product_info}
+
+**生成回复的指导原则：**
+1. 回复应该是有帮助的、有价值的，而不仅仅是推销产品
+2. 根据指定的语气风格（{tone}）调整表述方式
+3. 自然地融入产品信息，避免生硬推销
+4. 考虑平台的文化和用户期望（{platform}）
+5. 保持回复的长度在{max_length}字以内
+6. 包含适当的号召行动（CTA），如"了解更多"或"尝试免费版本"
+7. 使用友好、专业的语言
+
+**请生成一个高质量的回复：**
+"""
+
+REPLY_GENERATION_PROMPT_EN = """Please generate an appropriate reply based on the following social media content.
+
+**Original Content:**
+{original_content}
+
+**Reply Requirements:**
+- Platform: {platform}
+- Tone: {tone}
+- Max Length: {max_length} characters
+
+**Product Information:**
+{product_info}
+
+**Principles for Generating Reply:**
+1. The reply should be helpful and valuable, not just a sales pitch
+2. Adjust the expression according to the specified tone ({tone})
+3. Naturally incorporate product information, avoiding hard selling
+4. Consider platform culture and user expectations ({platform})
+5. Keep the reply within {max_length} characters
+6. Include appropriate call-to-action (CTA), such as "Learn More" or "Try Free Version"
+7. Use friendly, professional language
+
+**Please generate a high-quality reply:**
+"""
+
+
+# ============================================================================
+# 新的 Prompt 获取函数
+# ============================================================================
+
+
+def get_relevance_evaluation_template(language: str = "zh") -> str:
+    """获取相关性评判的 Prompt 模板。
+
+    Args:
+        language: 语言 ("zh" 或 "en")
+
+    Returns:
+        Prompt 模板字符串
+    """
+    if language == "en":
+        return RELEVANCE_EVALUATION_PROMPT_EN
+    else:
+        return RELEVANCE_EVALUATION_PROMPT_ZH
+
+
+def get_reply_generation_template(language: str = "zh") -> str:
+    """获取回复生成的 Prompt 模板。
+
+    Args:
+        language: 语言 ("zh" 或 "en")
+
+    Returns:
+        Prompt 模板字符串
+    """
+    if language == "en":
+        return REPLY_GENERATION_PROMPT_EN
+    else:
+        return REPLY_GENERATION_PROMPT_ZH

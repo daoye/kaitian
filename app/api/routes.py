@@ -30,6 +30,20 @@ from app.services.content_generation import (
     SEOOptimizationResponse,
     get_content_generation_service,
 )
+from app.services.keyword_service import keyword_service
+from app.services.social_media_service import social_media_service
+from app.services.ai_service import ai_service
+from app.services.notification_service import notification_service, publish_service
+from app.models.schemas import (
+    KeywordUniverseCreate,
+    KeywordUniverseResponse,
+    SocialSearchRequest,
+    SocialSearchResponse,
+    NotificationPushRequest,
+    NotificationPushResponse,
+    ReviewCallbackRequest,
+    ReviewCallbackResponse,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["api"])
@@ -475,3 +489,154 @@ async def get_generation_status():
     except Exception as e:
         logger.error(f"获取服务状态失败: {str(e)}")
         return {"success": False, "status": "error", "error": str(e)}
+
+
+# ============================================================================
+# 新工作流端点：关键词管理、社媒搜索、AI 评判与回复、推送与回调
+# ============================================================================
+
+
+@router.post("/keywords/universe", response_model=KeywordUniverseResponse)
+async def create_keywords_universe(request: KeywordUniverseCreate, db: Session = Depends(get_db)):
+    try:
+        universe = keyword_service.create_universe(
+            db=db,
+            name=request.name,
+            description=request.description,
+            keywords=request.keywords,
+            category=request.category,
+            tags=request.tags,
+        )
+        db.refresh(universe)
+        return KeywordUniverseResponse(
+            id=str(universe.id),
+            name=str(universe.name),
+            description=universe.description,
+            keywords=json.loads(universe.keywords) if universe.keywords else [],
+            category=universe.category,
+            tags=json.loads(universe.tags) if universe.tags else [],
+            is_active=bool(universe.is_active),
+            created_at=universe.created_at,
+            updated_at=universe.updated_at,
+        )
+    except Exception as e:
+        logger.error(f"Create keyword universe failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search/social-media", response_model=SocialSearchResponse)
+async def search_social_media(request: SocialSearchRequest, db: Session = Depends(get_db)):
+    try:
+        result = social_media_service.search_multiple_platforms(
+            db=db,
+            keyword=request.keyword,
+            platforms=request.platforms,
+            limit_per_platform=request.limit_per_page or 10,
+            pages=request.pages or 3,
+        )
+        return SocialSearchResponse(
+            success=True,
+            search_id=result.get("search_id"),
+            keyword=result.get("keyword"),
+            total_results=result.get("total_results"),
+            results_per_platform=result.get("results_per_platform"),
+        )
+    except Exception as e:
+        logger.error(f"Social media search failed: {str(e)}")
+        return SocialSearchResponse(success=False, error=str(e))
+
+
+@router.post("/ai/evaluate-relevance")
+async def evaluate_relevance(
+    post_id: str, content: str, product_description: str, db: Session = Depends(get_db)
+):
+    try:
+        result = ai_service.evaluate_relevance(
+            db=db, post_id=post_id, content=content, product_description=product_description
+        )
+        return {
+            "success": True,
+            "post_id": post_id,
+            "is_relevant": result.is_relevant,
+            "relevance_score": result.score,
+            "confidence": result.confidence,
+            "reasoning": result.reasoning,
+            "suggested_angle": result.suggested_angle,
+        }
+    except Exception as e:
+        logger.error(f"Evaluate relevance failed: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/ai/generate-reply")
+async def generate_reply(
+    post_id: str,
+    original_content: str,
+    platform: str = "reddit",
+    tone: str = "professional",
+    db: Session = Depends(get_db),
+):
+    try:
+        product_info = (
+            get_settings().product_info if hasattr(get_settings(), "product_info") else None
+        )
+        result = ai_service.generate_reply(
+            db=db,
+            post_id=post_id,
+            original_content=original_content,
+            platform=platform,
+            tone=tone,
+            product_info=product_info,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Generate reply failed: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/notifications/push-for-review", response_model=NotificationPushResponse)
+async def push_for_review(request: NotificationPushRequest, db: Session = Depends(get_db)):
+    try:
+        res = notification_service.push_for_review(
+            db=db,
+            reply_id=request.reply_id,
+            post_id=request.post_id,
+            original_content=request.original_content,
+            generated_reply=request.generated_reply,
+            callback_url=request.callback_url,
+            metadata=request.metadata,
+            expires_in_hours=request.expires_in_hours or 24,
+        )
+        return NotificationPushResponse(**res)
+    except Exception as e:
+        logger.error(f"Push for review failed: {str(e)}")
+        return NotificationPushResponse(success=False, error=str(e))
+
+
+@router.post("/webhooks/review-callback", response_model=ReviewCallbackResponse)
+async def review_callback(request: ReviewCallbackRequest, db: Session = Depends(get_db)):
+    try:
+        res = notification_service.handle_review_callback(
+            db=db,
+            notification_id=request.notification_id,
+            action=request.action,
+            user_notes=request.user_notes,
+        )
+        return ReviewCallbackResponse(**res)
+    except Exception as e:
+        logger.error(f"Review callback processing failed: {str(e)}")
+        return ReviewCallbackResponse(success=False, error=str(e))
+
+
+@router.post("/publish/record")
+async def record_publish(
+    post_id: str, reply: str, platform: str, published_url: str, db: Session = Depends(get_db)
+):
+    try:
+        res = publish_service.record_publish(
+            db=db, post_id=post_id, reply=reply, platform=platform, published_url=published_url
+        )
+        return res
+    except Exception as e:
+        logger.error(f"Record publish failed: {str(e)}")
+        return {"success": False, "error": str(e)}
