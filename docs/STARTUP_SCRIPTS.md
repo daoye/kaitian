@@ -38,6 +38,7 @@ cd ../postiz-app && npm run dev             # Terminal 3
 ### start.sh（Bash 脚本）
 
 **特性**:
+- ✅ 自动创建和使用 Python 虚拟环境
 - ✅ 自动克隆仓库（如果不存在）
 - ✅ 自动安装依赖（Python + Node.js）
 - ✅ 彩色输出，用户体验好
@@ -92,6 +93,7 @@ cd ../postiz-app && npm run dev             # Terminal 3
 ### start.py（Python 脚本）
 
 **特性**:
+- ✅ 自动创建和使用 Python 虚拟环境
 - ✅ 跨平台支持（Windows/macOS/Linux）
 - ✅ 更灵活的配置管理
 - ✅ 易于扩展（添加新服务）

@@ -3,10 +3,10 @@
 ## 🚀 一行命令启动
 
 ```bash
-# Bash 脚本
+# Bash 脚本（自动创建和使用虚拟环境）
 ./start.sh
 
-# Python 脚本
+# Python 脚本（自动创建和使用虚拟环境）
 python start.py
 
 # 手动启动（3 个不同的终端）
@@ -14,6 +14,13 @@ python main.py                    # Terminal 1: KaiTian
 cd ../MediaCrawler && python -m media_crawler.main  # Terminal 2
 cd ../postiz-app && npm run dev   # Terminal 3
 ```
+
+## 💡 虚拟环境说明
+
+- 启动脚本自动创建虚拟环境在 `./venv` 目录
+- 无需手动激活虚拟环境
+- 所有依赖自动安装到虚拟环境中
+- 支持多 Python 版本隔离
 
 ## 📍 服务端点
 

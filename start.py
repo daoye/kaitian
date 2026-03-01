@@ -33,7 +33,17 @@ class ServiceManager:
         self.processes = {}
         self.log_dir = self.base_dir / "logs"
         self.log_dir.mkdir(exist_ok=True)
+        self.venv_path = self.base_dir / "venv"
 
+    def _get_venv_python(self) -> str:
+        """Get the path to Python in the virtual environment."""
+        if os.name == "nt":  # Windows
+            return str(self.venv_path / "Scripts" / "python.exe")
+        else:  # Linux/macOS
+            return str(self.venv_path / "bin" / "python")
+
+    def _init_services_config(self):
+        """Initialize service configurations."""
         # Service configurations
         self.services_config = {
             "kaitian": {
@@ -41,7 +51,7 @@ class ServiceManager:
                 "name": "KaiTian",
                 "description": "KaiTian API Service",
                 "port": 8000,
-                "cmd": [sys.executable, "main.py"],
+                "cmd": [self._get_venv_python(), "main.py"],
                 "env": self._get_kaitian_env(),
                 "startup_msg": "Application startup complete",
             },
@@ -50,7 +60,7 @@ class ServiceManager:
                 "name": "MediaCrawler",
                 "description": "MediaCrawler Service",
                 "port": 8888,
-                "cmd": [sys.executable, "-m", "media_crawler.main"],
+                "cmd": [self._get_venv_python(), "-m", "media_crawler.main"],
                 "env": self._get_mediacrawler_env(),
                 "startup_msg": "MediaCrawler started",
             },
@@ -64,6 +74,23 @@ class ServiceManager:
                 "startup_msg": "ready in",
             },
         }
+
+    def setup_venv(self) -> bool:
+        """Setup and activate virtual environment."""
+        if self.venv_path.exists():
+            print(f"✓ Virtual environment already exists at {self.venv_path}")
+            return True
+
+        print(f"📦 Creating virtual environment at {self.venv_path}...")
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "venv", str(self.venv_path)], check=True, capture_output=True
+            )
+            print(f"✓ Virtual environment created successfully")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"✗ Failed to create virtual environment: {e}")
+            return False
 
     def _get_kaitian_env(self) -> dict:
         """Get environment variables for KaiTian."""
@@ -172,23 +199,25 @@ class ServiceManager:
 
         try:
             if service == "kaitian":
-                # Install Python dependencies
-                cmd = [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"]
-                subprocess.run(cmd, cwd=service_path, check=True)
+                # Install Python dependencies using venv Python
+                venv_python = self._get_venv_python()
+                cmd = [venv_python, "-m", "pip", "install", "-r", "requirements.txt"]
+                subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
                 print(f"✓ {config['name']} dependencies installed")
                 return True
 
             elif service == "mediacrawler":
-                # Install MediaCrawler dependencies
-                cmd = [sys.executable, "-m", "pip", "install", "-e", "."]
-                subprocess.run(cmd, cwd=service_path, check=True)
+                # Install MediaCrawler dependencies using venv Python
+                venv_python = self._get_venv_python()
+                cmd = [venv_python, "-m", "pip", "install", "-e", "."]
+                subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
                 print(f"✓ {config['name']} dependencies installed")
                 return True
 
             elif service == "postiz":
                 # Install Node.js dependencies
                 cmd = ["npm", "install"]
-                subprocess.run(cmd, cwd=service_path, check=True)
+                subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
                 print(f"✓ {config['name']} dependencies installed")
                 return True
 
@@ -378,6 +407,14 @@ class ServiceManager:
 
     def run(self, args: argparse.Namespace):
         """Run the startup manager."""
+        # Setup virtual environment first
+        if not self.setup_venv():
+            print("\n✗ Failed to setup virtual environment")
+            sys.exit(1)
+
+        # Initialize service configurations after venv path is determined
+        self._init_services_config()
+
         # Handle specific commands
         if args.clone_deps:
             self.clone_repository("mediacrawler")

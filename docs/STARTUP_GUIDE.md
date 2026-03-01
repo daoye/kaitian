@@ -18,6 +18,23 @@ node --version        # 应该是 16+
 git --version         # 应该是 2.0+
 ```
 
+### 虚拟环境
+
+两个启动脚本都会自动创建并使用 Python 虚拟环境（如果不存在的话）。这是推荐的做法，可以避免与系统 Python 包的冲突。
+
+- **自动创建**: 运行启动脚本时会自动在 `./venv` 目录下创建虚拟环境
+- **自动激活**: 虚拟环境会在脚本运行时自动激活
+- **使用 pip**: 依赖会自动通过 pip 安装到虚拟环境中
+
+如果需要手动创建虚拟环境：
+```bash
+python -m venv venv
+source venv/bin/activate    # Linux/macOS
+# 或
+venv\Scripts\activate       # Windows
+pip install -r requirements.txt
+```
+
 ## 🚀 快速开始
 
 ### 方式 1：Bash 脚本（推荐）

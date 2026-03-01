@@ -90,6 +90,68 @@ check_command() {
 	fi
 }
 
+setup_venv() {
+	local venv_path="$SCRIPT_DIR/venv"
+
+	if [ ! -d "$venv_path" ]; then
+		log_info "Creating Python virtual environment..."
+		if python -m venv "$venv_path"; then
+			log_success "Virtual environment created at $venv_path"
+		else
+			log_error "Failed to create virtual environment"
+			return 1
+		fi
+	fi
+
+	# Activate virtual environment
+	if [ -f "$venv_path/bin/activate" ]; then
+		source "$venv_path/bin/activate"
+		log_success "Virtual environment activated"
+		return 0
+	else
+		log_error "Failed to activate virtual environment"
+		return 1
+	fi
+}
+
+check_venv() {
+	local venv_path="$SCRIPT_DIR/venv"
+
+	if [ -d "$venv_path" ]; then
+		if [ -f "$venv_path/bin/activate" ]; then
+			source "$venv_path/bin/activate"
+			return 0
+		fi
+	fi
+
+	log_warning "Virtual environment not found. Creating one..."
+	setup_venv
+}
+
+get_venv_python() {
+	local venv_path="$SCRIPT_DIR/venv"
+	if [ -f "$venv_path/bin/python" ]; then
+		echo "$venv_path/bin/python"
+	else
+		echo "python"
+	fi
+}
+
+install_kaitian_deps() {
+	log_info "Installing KaiTian dependencies..."
+	cd "$SCRIPT_DIR"
+
+	local venv_python=$(get_venv_python)
+
+	if "$venv_python" -m pip install -q -r requirements.txt; then
+		log_success "KaiTian dependencies installed"
+		return 0
+	else
+		log_error "Failed to install KaiTian dependencies"
+		return 1
+	fi
+}
+
 clone_repo() {
 	local service=$1
 	local url=$2
@@ -134,7 +196,9 @@ install_mediacrawler_deps() {
 	log_info "Installing MediaCrawler dependencies..."
 	cd "$path"
 
-	if python -m pip install -q -e .; then
+	local venv_python=$(get_venv_python)
+
+	if "$venv_python" -m pip install -q -e .; then
 		log_success "MediaCrawler dependencies installed"
 		return 0
 	else
@@ -171,7 +235,9 @@ start_kaitian() {
 		log_info "Starting KaiTian (port $port)..."
 		cd "$SCRIPT_DIR"
 
-		python main.py >"$log_file" 2>&1 &
+		local venv_python=$(get_venv_python)
+
+		"$venv_python" main.py >"$log_file" 2>&1 &
 		local pid=$!
 		echo $pid >>"$PIDS_FILE"
 
@@ -200,7 +266,9 @@ start_mediacrawler() {
 		log_info "Starting MediaCrawler (port $port)..."
 		cd "$path"
 
-		python -m media_crawler.main >"$log_file" 2>&1 &
+		local venv_python=$(get_venv_python)
+
+		"$venv_python" -m media_crawler.main >"$log_file" 2>&1 &
 		local pid=$!
 		echo $pid >>"$PIDS_FILE"
 
@@ -314,6 +382,9 @@ else
 		check_command python || exit 1
 		check_command npm || exit 1
 
+		# Setup/activate virtual environment
+		check_venv || exit 1
+
 		install_kaitian_deps || exit 1
 		install_mediacrawler_deps || exit 1
 		install_postiz_deps || exit 1
@@ -342,6 +413,9 @@ log_section "🎯 KaiTian Service Startup Manager"
 
 # Check required commands
 check_command python || exit 1
+
+# Setup/activate virtual environment
+check_venv || exit 1
 
 # For postiz, check npm
 if [[ " ${SERVICES[@]} " =~ " postiz " ]]; then
