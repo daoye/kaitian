@@ -2,14 +2,11 @@
 
 import json
 from typing import Dict, List, Optional, Any
-from datetime import datetime
-from sqlalchemy.orm import Session
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.tools import Tool
 
-from app.models.db import SocialMediaPost, GeneratedReply
 from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.services.prompt_templates import (
@@ -21,7 +18,7 @@ logger = get_logger(__name__)
 
 
 class LangChainAgentService:
-    """LangChain AI 代理服务 - 支持中英文帖子。"""
+    """LangChain AI代理服务 - 支持中英文帖子。"""
 
     def __init__(self):
         self.settings = get_settings()
@@ -34,8 +31,6 @@ class LangChainAgentService:
 
     def evaluate_relevance(
         self,
-        db: Session,
-        post_id: str,
         content: str,
         product_description: str,
         language: str = "zh",
@@ -46,8 +41,6 @@ class LangChainAgentService:
         使用 LangChain Agent 进行评判。
 
         Args:
-            db: 数据库会话
-            post_id: 帖子 ID
             content: 帖子内容
             product_description: 产品描述
             language: 语言 (zh 或 en)
@@ -77,30 +70,15 @@ class LangChainAgentService:
             # 解析响应
             result = self._parse_evaluation_response(response)
 
-            # 更新数据库
-            post = db.query(SocialMediaPost).filter(SocialMediaPost.id == post_id).first()
-
-            if post:
-                post.relevance_score = result.get("score", 0.0)
-                post.is_relevant = result.get("is_relevant", False)
-                post.relevance_reasoning = result.get("reasoning", "")
-                post.suggested_angle = result.get("suggested_angle")
-                post.sentiment = result.get("sentiment")
-                post.intent = result.get("intent")
-                post.urgency = result.get("urgency")
-                post.evaluated_at = datetime.utcnow()
-                db.commit()
-
-            logger.info(f"Evaluated relevance for post {post_id}: {result}")
+            logger.info(f"Evaluated relevance: {result}")
 
             return {
                 "success": True,
-                "post_id": post_id,
                 **result,
             }
 
         except Exception as e:
-            logger.error(f"Error evaluating relevance for post {post_id}: {str(e)}")
+            logger.error(f"Error evaluating relevance: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
@@ -108,8 +86,6 @@ class LangChainAgentService:
 
     def generate_reply(
         self,
-        db: Session,
-        post_id: str,
         original_content: str,
         platform: str,
         tone: str = "professional",
@@ -122,8 +98,6 @@ class LangChainAgentService:
         使用 LangChain Agent 生成回复。
 
         Args:
-            db: 数据库会话
-            post_id: 帖子 ID
             original_content: 原始帖子内容
             platform: 社交媒体平台
             tone: 语气风格
@@ -165,32 +139,18 @@ class LangChainAgentService:
                 product_info=product_info_str,
             )
 
-            # 保存到数据库
-            reply_id = f"reply_{datetime.utcnow().timestamp()}"
-            reply = GeneratedReply(
-                id=reply_id,
-                post_id=post_id,
-                original_reply=response,
-                current_reply=response,
-                confidence=0.85,
-                word_count=len(response.split()),
-                status="pending",
-            )
-            db.add(reply)
-            db.commit()
-
-            logger.info(f"Generated reply for post {post_id}")
+            logger.info(f"Generated reply (length: {len(response.split())} words)")
 
             return {
                 "success": True,
-                "reply_id": reply_id,
-                "generated_reply": response,
+                "reply": response,
                 "word_count": len(response.split()),
                 "confidence": 0.85,
+                "platform": platform,
             }
 
         except Exception as e:
-            logger.error(f"Error generating reply for post {post_id}: {str(e)}")
+            logger.error(f"Error generating reply: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),

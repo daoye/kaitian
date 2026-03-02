@@ -9,10 +9,9 @@
 # Python 脚本（自动创建和使用虚拟环境）
 python start.py
 
-# 手动启动（3 个不同的终端）
+# 手动启动（2 个不同的终端）
 python main.py                    # Terminal 1: KaiTian
-cd ../MediaCrawler && python -m media_crawler.main  # Terminal 2
-cd ../postiz-app && npm run dev   # Terminal 3
+cd MediaCrawler && uv run uvicorn api.main:app --port 8080  # Terminal 2
 ```
 
 ## 💡 虚拟环境说明
@@ -29,8 +28,7 @@ cd ../postiz-app && npm run dev   # Terminal 3
 | KaiTian API | http://localhost:8000/api/v1 | REST API |
 | KaiTian Docs | http://localhost:8000/docs | API 文档（Swagger） |
 | KaiTian Health | http://localhost:8000/api/v1/health | 健康检查 |
-| MediaCrawler | http://localhost:8888 | 爬虫服务 |
-| Postiz | http://localhost:3000 | 发布服务 |
+| MediaCrawler | http://localhost:8080 | 爬虫服务 WebUI |
 
 ## 🔧 常用命令
 
@@ -40,12 +38,11 @@ cd ../postiz-app && npm run dev   # Terminal 3
 ./start.sh --install-deps      # 安装依赖
 ./start.sh --clone-deps        # 克隆仓库
 ./start.sh kaitian             # 只启动 KaiTian
-./start.sh kaitian postiz      # 启动指定服务
+./start.sh kaitian,mediacrawler      # 启动指定服务
 
 # 查看日志
 tail -f logs/kaitian.log
 tail -f logs/mediacrawler.log
-tail -f logs/postiz.log
 
 # 查看运行的进程
 ps aux | grep "main.py"        # KaiTian
@@ -117,7 +114,6 @@ kaitian/
     └── DOCKER_DEPLOYMENT.md   # Docker 部署
 
 ../MediaCrawler/              # 爬虫项目
-../postiz-app/                # 发布项目
 ```
 
 ## 🎯 典型工作流
@@ -143,12 +139,8 @@ cd kaitian
 python main.py
 
 # Terminal 2 - MediaCrawler
-cd ../MediaCrawler
-python -m media_crawler.main
-
-# Terminal 3 - Postiz
-cd ../postiz-app
-npm run dev
+cd MediaCrawler
+uv run uvicorn api.main:app --port 8080
 ```
 
 ## 💻 跨平台说明
@@ -184,7 +176,6 @@ bash start.sh
 
 - [KaiTian GitHub](.)
 - [MediaCrawler GitHub](https://github.com/NanmiCoder/MediaCrawler)
-- [Postiz GitHub](https://github.com/gitroomhq/postiz-app)
 - [n8n 官网](https://n8n.io)
 
 ## 📞 获取帮助

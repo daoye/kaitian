@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-KaiTian Startup Script - Manage KaiTian, MediaCrawler, and Postiz services
+KaiTian Startup Script - Manage KaiTian and MediaCrawler services
 
 This script helps you quickly start all services from source code with proper
 configuration and dependency management.
@@ -42,6 +42,10 @@ class ServiceManager:
         else:  # Linux/macOS
             return str(self.venv_path / "bin" / "python")
 
+    def _get_uv_path(self) -> str:
+        """Get the path to uv executable."""
+        return "uv"
+
     def _init_services_config(self):
         """Initialize service configurations."""
         # Service configurations
@@ -56,22 +60,22 @@ class ServiceManager:
                 "startup_msg": "Application startup complete",
             },
             "mediacrawler": {
-                "path": self.base_dir / "../MediaCrawler",
+                "path": self.base_dir / "MediaCrawler",
                 "name": "MediaCrawler",
-                "description": "MediaCrawler Service",
-                "port": 8888,
-                "cmd": [self._get_venv_python(), "-m", "media_crawler.main"],
+                "description": "MediaCrawler Service - 小红书、抖音、快手、B站、微博、贴吧、知乎爬虫",
+                "port": 8080,
+                "cmd": [
+                    self._get_uv_path(),
+                    "run",
+                    "uvicorn",
+                    "api.main:app",
+                    "--port",
+                    "8080",
+                    "--host",
+                    "0.0.0.0",
+                ],
                 "env": self._get_mediacrawler_env(),
-                "startup_msg": "MediaCrawler started",
-            },
-            "postiz": {
-                "path": self.base_dir / "../postiz-app",
-                "name": "Postiz",
-                "description": "Postiz Application",
-                "port": 3000,
-                "cmd": ["npm", "run", "dev"],
-                "env": self._get_postiz_env(),
-                "startup_msg": "ready in",
+                "startup_msg": "Uvicorn running on",
             },
         }
 
@@ -111,17 +115,6 @@ class ServiceManager:
         # Add MediaCrawler specific environment variables if needed
         return env
 
-    def _get_postiz_env(self) -> dict:
-        """Get environment variables for Postiz."""
-        env = os.environ.copy()
-        env.update(
-            {
-                "NODE_ENV": "development",
-                "PORT": "3000",
-            }
-        )
-        return env
-
     def check_dependencies(self, service: str) -> bool:
         """Check if service dependencies are installed."""
         config = self.services_config.get(service)
@@ -146,11 +139,6 @@ class ServiceManager:
             except ImportError:
                 return False
 
-        elif service == "postiz":
-            # Check if node_modules exists
-            postiz_path = config["path"]
-            return (postiz_path / "node_modules").exists()
-
         return False
 
     def clone_repository(self, service: str) -> bool:
@@ -168,7 +156,6 @@ class ServiceManager:
 
         urls = {
             "mediacrawler": "https://github.com/NanmiCoder/MediaCrawler.git",
-            "postiz": "https://github.com/gitroomhq/postiz-app.git",
         }
 
         if service not in urls:
@@ -178,11 +165,38 @@ class ServiceManager:
         try:
             cmd = ["git", "clone", urls[service], str(service_path)]
             subprocess.run(cmd, check=True, capture_output=True)
-            print(f"✓ {config['name']} cloned successfully")
+            print(f"✓ {config['name']} cloned successfully to {service_path}")
+
+            # For MediaCrawler, copy example config
+            if service == "mediacrawler":
+                self._setup_mediacrawler_config(service_path)
+
             return True
         except subprocess.CalledProcessError as e:
             print(f"✗ Failed to clone {config['name']}: {e}")
             return False
+
+    def _setup_mediacrawler_config(self, service_path: Path):
+        """Setup MediaCrawler configuration files."""
+        try:
+            # Copy .env.example to .env if it exists
+            env_example = service_path / ".env.example"
+            env_file = service_path / ".env"
+
+            if env_example.exists() and not env_file.exists():
+                import shutil
+
+                shutil.copy(env_example, env_file)
+                print(f"✓ MediaCrawler .env file created from example")
+
+            # Copy config/base_config.py example if needed
+            config_dir = service_path / "config"
+            if config_dir.exists():
+                print(f"✓ MediaCrawler config directory ready")
+                print(f"   Please edit {config_dir}/base_config.py to configure crawler settings")
+
+        except Exception as e:
+            print(f"⚠ Failed to setup MediaCrawler config: {e}")
 
     def install_dependencies(self, service: str) -> bool:
         """Install dependencies for a service."""
@@ -207,17 +221,14 @@ class ServiceManager:
                 return True
 
             elif service == "mediacrawler":
-                # Install MediaCrawler dependencies using venv Python
-                venv_python = self._get_venv_python()
-                cmd = [venv_python, "-m", "pip", "install", "-e", "."]
+                # Install MediaCrawler dependencies using uv
+                cmd = ["uv", "sync"]
                 subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
-                print(f"✓ {config['name']} dependencies installed")
-                return True
 
-            elif service == "postiz":
-                # Install Node.js dependencies
-                cmd = ["npm", "install"]
+                # Install playwright browsers
+                cmd = ["uv", "run", "playwright", "install"]
                 subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
+
                 print(f"✓ {config['name']} dependencies installed")
                 return True
 
@@ -305,7 +316,7 @@ class ServiceManager:
     def start_all_services(self, services: Optional[List[str]] = None) -> bool:
         """Start all or specified services."""
         if not services:
-            services = ["kaitian", "mediacrawler", "postiz"]
+            services = ["kaitian", "mediacrawler"]
 
         print("=" * 60)
         print("🎯 KaiTian Service Startup Manager")
@@ -371,10 +382,8 @@ class ServiceManager:
                 "health": "http://localhost:8000/api/v1/health",
             },
             "mediacrawler": {
-                "api": "http://localhost:8888",
-            },
-            "postiz": {
-                "app": "http://localhost:3000",
+                "webui": "http://localhost:8080",
+                "docs": "http://localhost:8080/docs",
             },
         }
 
@@ -383,6 +392,13 @@ class ServiceManager:
                 print(f"\n{service.upper()}:")
                 for key, url in links.items():
                     print(f"  {key}: {url}")
+
+        if "mediacrawler" in self.processes:
+            print("\nMediaCrawler 使用说明:")
+            print("  - 访问 WebUI: http://localhost:8080")
+            print("  - 支持平台: 小红书、抖音、快手、B站、微博、贴吧、知乎")
+            print("  - 配置文件: ./MediaCrawler/config/base_config.py")
+            print("  - 使用命令: uv run main.py --platform xhs --lt qrcode --type search")
 
     def cleanup(self):
         """Clean up resources."""
@@ -418,11 +434,10 @@ class ServiceManager:
         # Handle specific commands
         if args.clone_deps:
             self.clone_repository("mediacrawler")
-            self.clone_repository("postiz")
             return
 
         if args.install_deps:
-            for service in ["kaitian", "mediacrawler", "postiz"]:
+            for service in ["kaitian", "mediacrawler"]:
                 self.install_dependencies(service)
             return
 
@@ -477,7 +492,7 @@ Examples:
 
     parser.add_argument(
         "--only",
-        help="Comma-separated list of services to start (kaitian, mediacrawler, postiz)",
+        help="Comma-separated list of services to start (kaitian, mediacrawler)",
         type=str,
     )
     parser.add_argument(

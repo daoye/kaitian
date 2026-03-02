@@ -4,11 +4,10 @@ import json
 import requests
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from sqlalchemy.orm import Session
 
-from app.models.db import SocialMediaPost, SearchSession
 from app.core.logging import get_logger
 from app.core.config import get_settings
+from app.services.state_store import state_store
 
 logger = get_logger(__name__)
 
@@ -23,44 +22,59 @@ class SocialMediaCrawlerService:
 
     async def crawl_with_crawl4ai(
         self,
-        db: Session,
         keyword: str,
         platforms: List[str],
         max_results: int = 30,
-        universe_id: Optional[str] = None,
+        resume_from_checkpoint: bool = True,
     ) -> Dict[str, Any]:
         """使用本地部署的 crawl4ai API 实时爬取社交媒体内容。
 
         这是核心业务流程：
         1. 根据关键词在社交媒体平台搜索
         2. 调用本地部署的 crawl4ai API 爬取页面内容
-        3. 实时返回内容给调用方（不是从数据库查询）
+        3. 实时返回内容给调用方（不使用数据库）
+        4. 保存状态到文件系统用于崩溃恢复
 
         Args:
-            db: 数据库会话
             keyword: 搜索关键词
-            platforms: 平台列表 (e.g., ["reddit", "twitter"])
+            platforms: 平台列表 (e.g., ["reddit", "twitter", "xhs"])
             max_results: 最大结果数
-            universe_id: 关键词宇宙 ID（用于记录）
+            resume_from_checkpoint: 是否尝试从检查点恢复
 
         Returns:
             爬取结果字典
         """
+        # 生成唯一的搜索会话 ID
         search_session_id = f"search_{datetime.utcnow().timestamp()}"
         results = []
 
         try:
             # 创建搜索会话记录
-            search_session = SearchSession(
-                id=search_session_id,
-                universe_id=universe_id,
-                keyword=keyword,
-                platforms=json.dumps(platforms),
-                pages=1,
-                status="in_progress",
+            state_store.save_search_session(
+                search_session_id=search_session_id,
+                session_data={
+                    "keyword": keyword,
+                    "platforms": platforms,
+                    "status": "in_progress",
+                    "current_page": 1,
+                    "total_results": 0,
+                    "relevant_count": 0,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "max_results": max_results,
+                },
             )
-            db.add(search_session)
-            db.commit()
+
+            # 尝试从检查点恢复
+            last_checkpoint = None
+            if resume_from_checkpoint:
+                last_checkpoint = state_store.load_last_checkpoint(
+                    session_id=search_session_id, checkpoint_type="page"
+                )
+
+            start_page = 1
+            if last_checkpoint:
+                start_page = last_checkpoint.get("page_number", 1) + 1
+                logger.info(f"Resuming from checkpoint: page {start_page}")
 
             # 为每个平台构建搜索 URL 并爬取
             platform_urls = self._build_search_urls(keyword, platforms)
@@ -74,36 +88,77 @@ class SocialMediaCrawlerService:
                         # 解析并提取帖子内容
                         posts = self._extract_posts_from_result(result, platform, keyword)
 
-                        # 保存到数据库（仅用于历史记录）
-                        for post_data in posts:
-                            self._save_post_to_db(db, post_data)
-
                         results.extend(posts)
                         logger.info(f"Crawled {len(posts)} posts from {platform}")
 
+                        # 保存每页检查点
+                        state_store.save_crawl_checkpoint(
+                            session_id=search_session_id,
+                            platform=platform,
+                            page_number=start_page,
+                            cursor=None,
+                            processed_count=len(posts),
+                            failed_count=0,
+                            checkpoint_type="page",
+                        )
+
+                    else:
+                        # 记录失败
+                        logger.error(f"Failed to crawl {platform}")
+                        state_store.save_failed_item(
+                            session_id=search_session_id,
+                            item_id=f"{platform}_page_{start_page}",
+                            item_data={"url": url},
+                            error_message=f"Crawl failed: {result.get('error', 'Unknown')}",
+                        )
+
                 except Exception as e:
                     logger.error(f"Error crawling {platform}: {str(e)}")
+                    state_store.save_failed_item(
+                        session_id=search_session_id,
+                        item_id=f"{platform}_page_{start_page}",
+                        item_data={"url": url},
+                        error_message=str(e),
+                    )
 
-            # 更新搜索会话
-            search_session.status = "completed"
-            search_session.total_results = len(results)
-            search_session.completed_at = datetime.utcnow()
-            db.commit()
+            # 更新搜索会话状态
+            state_store.save_search_session(
+                session_id=search_session_id,
+                session_data={
+                    "status": "completed",
+                    "total_results": len(results),
+                    "completed_at": datetime.utcnow().isoformat(),
+                },
+            )
+
+            # 清理检查点
+            state_store.cleanup_checkpoints(search_session_id, keep_days=1)
 
             return {
                 "success": True,
                 "search_id": search_session_id,
                 "keyword": keyword,
                 "total_results": len(results),
-                "posts": results,
+                "results_per_platform": {"all": results},
             }
 
         except Exception as e:
-            db.rollback()
             logger.error(f"Crawl failed for keyword '{keyword}': {str(e)}")
+
+            # 标记会话失败
+            state_store.save_search_session(
+                session_id=search_session_id,
+                session_data={
+                    "status": "failed",
+                    "error_message": str(e),
+                    "completed_at": datetime.utcnow().isoformat(),
+                },
+            )
+
             return {
                 "success": False,
                 "error": str(e),
+                "search_id": search_session_id,
             }
 
     def _call_crawl4ai_api(self, url: str) -> Optional[Dict[str, Any]]:
@@ -264,28 +319,212 @@ class SocialMediaCrawlerService:
 
         return posts
 
-    def _save_post_to_db(self, db: Session, post_data: Dict[str, Any]):
-        """将爬取的帖子保存到数据库（仅用于历史记录）。
+    async def crawl_post_detail(
+        self,
+        url: str,
+        platform: str,
+        extract_comments: bool = False,
+        max_comments: int = 10,
+    ) -> Dict[str, Any]:
+        """爬取单个帖子的详细内容。
 
-        注意：这不是业务流程的一部分，只是保存历史
+        Args:
+            url: 帖子 URL
+            platform: 平台类型 (reddit, twitter, linkedin, xhs, dy, bili, zhihu)
+            extract_comments: 是否提取评论
+            max_comments: 最大评论数
+
+        Returns:
+            帖子详情字典
         """
         try:
-            post = SocialMediaPost(
-                id=post_data.get("post_id"),
-                post_id=post_data.get("post_id"),
-                platform=post_data.get("platform"),
-                title=post_data.get("title"),
-                content=post_data.get("content"),
-                author=post_data.get("author"),
-                url=post_data.get("url"),
-                engagement=json.dumps(post_data.get("engagement", {})),
-                created_at=post_data.get("created_at"),
-            )
-            db.add(post)
-            db.commit()
+            # 调用 crawl4ai API 爬取帖子页面
+            result = self._call_crawl4ai_api(url)
+
+            if not result or not result.get("success"):
+                return {
+                    "success": False,
+                    "error": "Failed to crawl post",
+                    "url": url,
+                }
+
+            markdown = result.get("markdown", "")
+
+            # 根据平台解析帖子详情
+            post_detail = self._parse_post_detail(markdown, url, platform)
+
+            if extract_comments:
+                comments = self._extract_comments(markdown, platform, max_comments)
+                post_detail["comments"] = comments
+
+            return {
+                "success": True,
+                "post": post_detail,
+                "raw_content": markdown,
+            }
+
         except Exception as e:
-            logger.error(f"Failed to save post to database: {str(e)}")
-            db.rollback()
+            logger.error(f"Failed to crawl post detail: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "url": url,
+            }
+
+    def _parse_post_detail(
+        self,
+        markdown: str,
+        url: str,
+        platform: str,
+    ) -> Dict[str, Any]:
+        """从 Markdown 内容中解析帖子详情。
+
+        Args:
+            markdown: 爬取的 Markdown 内容
+            url: 帖子 URL
+            platform: 平台类型
+
+        Returns:
+            结构化的帖子详情
+        """
+        from app.models.schemas import PostEngagement
+
+        # 生成帖子 ID
+        post_id = f"{platform}_{datetime.utcnow().timestamp()}"
+
+        # 基础解析逻辑
+        lines = markdown.split("\n")
+        title = None
+        content_lines = []
+        author = "unknown"
+
+        for i, line in enumerate(lines):
+            # 提取标题
+            if i == 0 and line.startswith("# "):
+                title = line.lstrip("#").strip()
+                continue
+
+            # 提取作者（简化逻辑，实际需根据平台调整）
+            if "author:" in line.lower() or "by:" in line.lower():
+                author = line.split(":")[-1].strip()
+                continue
+
+            # 收集内容
+            if line.strip():
+                content_lines.append(line)
+
+        content = "\n".join(content_lines)
+
+        # 构建帖子详情
+        post_detail = {
+            "post_id": post_id,
+            "platform": platform,
+            "url": url,
+            "title": title,
+            "content": content,
+            "author": author,
+            "author_id": None,
+            "author_url": None,
+            "created_at": None,
+            "engagement": PostEngagement().model_dump(),
+            "comments": [],
+            "media_urls": [],
+            "tags": [],
+        }
+
+        # 平台特定解析
+        if platform == "reddit":
+            post_detail.update(self._parse_reddit_post(markdown, url))
+        elif platform == "twitter":
+            post_detail.update(self._parse_twitter_post(markdown, url))
+        elif platform == "linkedin":
+            post_detail.update(self._parse_linkedin_post(markdown, url))
+
+        return post_detail
+
+    def _parse_reddit_post(self, markdown: str, url: str) -> Dict[str, Any]:
+        """解析 Reddit 帖子详情。"""
+        result = {"subreddit": None}
+
+        # 从 URL 提取 subreddit
+        if "reddit.com/r/" in url:
+            parts = url.split("/r/")
+            if len(parts) > 1:
+                subreddit = parts[1].split("/")[0]
+                result["subreddit"] = subreddit
+
+        # 提取互动数据（简化逻辑）
+        if "upvote" in markdown.lower():
+            result["engagement"] = {"upvotes": 0, "comments_count": 0}
+
+        return result
+
+    def _parse_twitter_post(self, markdown: str, url: str) -> Dict[str, Any]:
+        """解析 Twitter/X 推文详情。"""
+        result = {}
+
+        # 简化解析逻辑
+        if "reply" in markdown.lower() or "replies" in markdown.lower():
+            result["engagement"] = {"likes": 0, "retweets": 0, "comments_count": 0}
+
+        return result
+
+    def _parse_linkedin_post(self, markdown: str, url: str) -> Dict[str, Any]:
+        """解析 LinkedIn 帖子详情。"""
+        result = {}
+
+        # 简化解析逻辑
+        if "like" in markdown.lower():
+            result["engagement"] = {"likes": 0, "comments_count": 0, "shares": 0}
+
+        return result
+
+    def _extract_comments(
+        self,
+        markdown: str,
+        platform: str,
+        max_comments: int,
+    ) -> List[Dict[str, Any]]:
+        """从 Markdown 中提取评论。
+
+        Args:
+            markdown: 爬取的 Markdown 内容
+            platform: 平台类型
+            max_comments: 最大评论数
+
+        Returns:
+            评论列表
+        """
+        comments = []
+        lines = markdown.split("\n")
+
+        # 简化的评论提取逻辑
+        current_comment = None
+        comment_count = 0
+
+        for line in lines:
+            # 检测评论开始（通常以特定格式开始）
+            if line.strip().startswith("> ") or "> **" in line:
+                if current_comment:
+                    comments.append(current_comment)
+                    comment_count += 1
+                    if comment_count >= max_comments:
+                        break
+
+                current_comment = {
+                    "comment_id": f"comment_{comment_count}_{datetime.utcnow().timestamp()}",
+                    "author": "unknown",
+                    "content": line.strip().lstrip(">").strip(),
+                    "created_at": None,
+                    "upvotes": None,
+                }
+            elif current_comment and line.strip():
+                current_comment["content"] += " " + line.strip()
+
+        if current_comment and comment_count < max_comments:
+            comments.append(current_comment)
+
+        return comments
 
 
 # 创建全局单例实例

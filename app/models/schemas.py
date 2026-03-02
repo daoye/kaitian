@@ -197,5 +197,81 @@ class ReviewCallbackResponse(BaseModel):
     success: bool
     notification_id: Optional[str] = None
     action: Optional[str] = None
+
+
+# ============================================================================
+# Post Detail Models - 帖子详情爬取
+# ============================================================================
+
+
+class PlatformEnum(str, Enum):
+    """支持的社交媒体平台"""
+
+    REDDIT = "reddit"
+    TWITTER = "twitter"
+    LINKEDIN = "linkedin"
+    XHS = "xhs"  # 小红书
+    DY = "dy"  # 抖音
+    BILI = "bili"  # B站
+    ZHIHU = "zhihu"  # 知乎
+
+
+class PostDetailRequest(BaseModel):
+    """帖子详情爬取请求"""
+
+    url: str = Field(..., description="帖子 URL")
+    platform: PlatformEnum = Field(..., description="平台类型")
+    extract_comments: bool = Field(default=False, description="是否提取评论")
+    max_comments: int = Field(default=10, description="最大评论数")
+
+
+class PostEngagement(BaseModel):
+    """帖子互动数据"""
+
+    upvotes: Optional[int] = Field(default=None, description="点赞数")
+    downvotes: Optional[int] = Field(default=None, description="踩数")
+    comments_count: Optional[int] = Field(default=None, description="评论数")
+    shares: Optional[int] = Field(default=None, description="分享数")
+    views: Optional[int] = Field(default=None, description="浏览数")
+    likes: Optional[int] = Field(default=None, description="喜欢数")
+    retweets: Optional[int] = Field(default=None, description="转发数")
+
+
+class PostComment(BaseModel):
+    """帖子评论"""
+
+    comment_id: str = Field(..., description="评论 ID")
+    author: str = Field(..., description="评论者")
+    content: str = Field(..., description="评论内容")
+    created_at: Optional[str] = Field(default=None, description="评论时间")
+    upvotes: Optional[int] = Field(default=None, description="点赞数")
+
+
+class PostDetail(BaseModel):
+    """帖子详情"""
+
+    post_id: str = Field(..., description="帖子 ID")
+    platform: str = Field(..., description="平台")
+    url: str = Field(..., description="帖子 URL")
+    title: Optional[str] = Field(default=None, description="标题")
+    content: str = Field(..., description="正文内容")
+    author: str = Field(..., description="作者")
+    author_id: Optional[str] = Field(default=None, description="作者 ID")
+    author_url: Optional[str] = Field(default=None, description="作者主页 URL")
+    created_at: Optional[str] = Field(default=None, description="发布时间")
+    engagement: PostEngagement = Field(default_factory=PostEngagement, description="互动数据")
+    comments: List[PostComment] = Field(default_factory=list, description="评论列表")
+    media_urls: List[str] = Field(default_factory=list, description="媒体 URL（图片/视频）")
+    tags: List[str] = Field(default_factory=list, description="标签")
+    subreddit: Optional[str] = Field(default=None, description="Subreddit（Reddit专用）")
+
+
+class PostDetailResponse(BaseModel):
+    """帖子详情爬取响应"""
+
+    success: bool = Field(..., description="是否成功")
+    post: Optional[PostDetail] = Field(default=None, description="帖子详情")
+    raw_content: Optional[str] = Field(default=None, description="原始 Markdown 内容")
+    error: Optional[str] = Field(default=None, description="错误信息")
     status: Optional[str] = None
     error: Optional[str] = None

@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import get_settings
 from app.core.logging import setup_logging, get_logger
-from app.core.database import init_db
 from app.api import routes
 
 logger = get_logger(__name__)
@@ -24,12 +23,17 @@ async def lifespan(app: FastAPI):
         f"Version: {settings.app_version}"
     )
 
-    # Initialize database
-    try:
-        init_db()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {str(e)}")
+    # Initialize data directories
+    from app.services.state_store import (
+        SESSIONS_DIR,
+        CHECKPOINTS_DIR,
+        FAILED_DIR,
+        PLATFORM_SESSIONS_DIR,
+    )
+
+    for directory in [SESSIONS_DIR, CHECKPOINTS_DIR, FAILED_DIR, PLATFORM_SESSIONS_DIR]:
+        directory.mkdir(parents=True, exist_ok=True)
+    logger.info("Data directories initialized")
 
     yield
 

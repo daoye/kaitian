@@ -15,7 +15,6 @@ dependencies = [
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.25.0",
-    "sqlalchemy>=2.0",
     "python-json-logger>=2.0.0",
     
     # LangChain & AI
@@ -26,9 +25,7 @@ dependencies = [
     # Web Crawling
     "crawl4ai>=0.8.0",
     "playwright>=1.40.0",
-    
-    # Optional: Redis
-    "redis>=5.0.0",
+    "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]

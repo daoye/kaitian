@@ -27,7 +27,6 @@ kaitian/
 │   │   ├── __init__.py
 │   │   ├── reddit_client.py     # Reddit API client
 │   │   ├── ai_client.py         # AI service client
-│   │   ├── postiz_client.py     # Postiz integration
 │   │   └── linu_client.py       # Linu integration
 │   └── utils/                    # Utility functions
 │       ├── __init__.py
@@ -71,7 +70,6 @@ kaitian/
 ### `app/integrations/`
 - **reddit_client.py**: PRAW-based Reddit API wrapper
 - **ai_client.py**: External AI service client
-- **postiz_client.py**: Postiz API integration
 - **linu_client.py**: Linu API integration
 
 ### `app/utils/`
