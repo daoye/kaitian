@@ -273,5 +273,55 @@ class PostDetailResponse(BaseModel):
     post: Optional[PostDetail] = Field(default=None, description="帖子详情")
     raw_content: Optional[str] = Field(default=None, description="原始 Markdown 内容")
     error: Optional[str] = Field(default=None, description="错误信息")
-    status: Optional[str] = None
-    error: Optional[str] = None
+
+
+# ============================================================================
+# Publisher Models - 发布能力
+# ============================================================================
+
+
+class PublishPlatformEnum(str, Enum):
+    """支持发布的平台"""
+
+    REDDIT = "reddit"
+    TWITTER = "twitter"
+    LINKEDIN = "linkedin"
+
+
+class PublishPostRequest(BaseModel):
+    """发布帖子请求"""
+
+    platform: PublishPlatformEnum = Field(..., description="目标平台")
+    title: Optional[str] = Field(default=None, description="标题（Reddit必需）")
+    content: str = Field(..., description="帖子内容")
+    subreddit: Optional[str] = Field(default=None, description="Subreddit名称（Reddit专用）")
+    media_urls: Optional[List[str]] = Field(default=None, description="媒体URL列表")
+
+
+class PublishPostResponse(BaseModel):
+    """发布帖子响应"""
+
+    success: bool = Field(..., description="是否成功")
+    post_id: Optional[str] = Field(default=None, description="发布的帖子ID")
+    post_url: Optional[str] = Field(default=None, description="帖子URL")
+    platform: Optional[str] = Field(default=None, description="平台")
+    error: Optional[str] = Field(default=None, description="错误信息")
+
+
+class PublishCommentRequest(BaseModel):
+    """发布评论请求"""
+
+    platform: PublishPlatformEnum = Field(..., description="目标平台")
+    post_url: str = Field(..., description="目标帖子URL")
+    content: str = Field(..., description="评论内容")
+    parent_comment_id: Optional[str] = Field(default=None, description="父评论ID（用于回复评论）")
+
+
+class PublishCommentResponse(BaseModel):
+    """发布评论响应"""
+
+    success: bool = Field(..., description="是否成功")
+    comment_id: Optional[str] = Field(default=None, description="评论ID")
+    comment_url: Optional[str] = Field(default=None, description="评论URL")
+    platform: Optional[str] = Field(default=None, description="平台")
+    error: Optional[str] = Field(default=None, description="错误信息")

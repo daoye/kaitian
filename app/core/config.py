@@ -78,6 +78,29 @@ class Settings(BaseSettings):
     langchain_tracing_enabled: bool = False
     langchain_api_key: Optional[str] = None
 
+    # ====================
+    # Publisher 配置 - 社交媒体发布
+    # ====================
+
+    # Reddit 配置
+    reddit_client_id: Optional[str] = None
+    reddit_client_secret: Optional[str] = None
+    reddit_user_agent: str = "KaiTian/0.1.0"
+    reddit_username: Optional[str] = None
+    reddit_password: Optional[str] = None
+
+    # Twitter/X 配置
+    twitter_consumer_key: Optional[str] = None
+    twitter_consumer_secret: Optional[str] = None
+    twitter_access_token: Optional[str] = None
+    twitter_access_token_secret: Optional[str] = None
+
+    # LinkedIn 配置
+    linkedin_client_id: Optional[str] = None
+    linkedin_client_secret: Optional[str] = None
+    linkedin_access_token: Optional[str] = None
+    linkedin_person_urn: Optional[str] = None
+
     class Config:
         env_file = ".env"
         case_sensitive = False

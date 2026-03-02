@@ -174,7 +174,7 @@ async def search_social_media(
         return {"success": False, "error": str(e)}
 
 
-@router.post("/crawler/post")
+@router.post("/crawler/get")
 async def crawl_post_detail(
     url: str,
     platform: str = "reddit",
@@ -455,3 +455,92 @@ async def get_ai_status():
     except Exception as e:
         logger.error(f"获取服务状态失败: {str(e)}")
         return {"success": False, "status": "error", "error": str(e)}
+
+
+# ============================================================================
+# Publisher Endpoints - 发布能力
+# ============================================================================
+
+
+@router.post("/publisher/post")
+async def publish_post(
+    platform: str,
+    content: str,
+    title: Optional[str] = None,
+    subreddit: Optional[str] = None,
+):
+    """
+    发布帖子到社交媒体平台。
+
+    支持平台：Reddit, Twitter, LinkedIn
+
+    Args:
+        platform: 目标平台 (reddit, twitter, linkedin)
+        content: 帖子内容
+        title: 标题（Reddit 必需）
+        subreddit: Subreddit 名称（Reddit 必需）
+
+    Returns:
+        {
+            "success": bool,
+            "post_id": str,
+            "post_url": str,
+            "platform": str,
+            "error": str (if failed)
+        }
+    """
+    try:
+        from app.services.publisher_service import publisher_service
+
+        result = await publisher_service.publish_post(
+            platform=platform,
+            content=content,
+            title=title,
+            subreddit=subreddit,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Publish post failed: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/publisher/comment")
+async def publish_comment(
+    platform: str,
+    post_url: str,
+    content: str,
+    parent_comment_id: Optional[str] = None,
+):
+    """
+    发布评论/回复到社交媒体平台。
+
+    支持平台：Reddit, Twitter, LinkedIn
+
+    Args:
+        platform: 目标平台 (reddit, twitter, linkedin)
+        post_url: 目标帖子 URL
+        content: 评论内容
+        parent_comment_id: 父评论 ID（用于回复评论，可选）
+
+    Returns:
+        {
+            "success": bool,
+            "comment_id": str,
+            "comment_url": str,
+            "platform": str,
+            "error": str (if failed)
+        }
+    """
+    try:
+        from app.services.publisher_service import publisher_service
+
+        result = await publisher_service.publish_comment(
+            platform=platform,
+            post_url=post_url,
+            content=content,
+            parent_comment_id=parent_comment_id,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Publish comment failed: {str(e)}")
+        return {"success": False, "error": str(e)}
