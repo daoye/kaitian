@@ -60,19 +60,19 @@ class StateStore:
         """
         try:
             session_file = SESSIONS_DIR / f"{session_id}.json"
-            
+
             # Load existing data if any
             if session_file.exists():
                 existing = StateStore._load_json(session_file)
                 existing.update(session_data)
                 session_data = existing
-            
+
             session_data["updated_at"] = datetime.utcnow().isoformat()
-            
+
             StateStore._save_json(session_file, session_data)
             logger.info(f"Search session saved: {session_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to save search session {session_id}: {str(e)}")
             return False
@@ -92,11 +92,11 @@ class StateStore:
             if not session_file.exists():
                 logger.warning(f"Search session not found: {session_id}")
                 return None
-            
+
             session_data = StateStore._load_json(session_file)
             logger.info(f"Search session loaded: {session_id}")
             return session_data
-            
+
         except Exception as e:
             logger.error(f"Failed to load search session {session_id}: {str(e)}")
             return None
@@ -117,11 +117,11 @@ class StateStore:
                 session_data = StateStore._load_json(session_file)
                 if status_filter is None or session_data.get("status") == status_filter:
                     sessions.append(session_data)
-            
+
             # Sort by created_at descending
             sessions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
             return sessions
-            
+
         except Exception as e:
             logger.error(f"Failed to list search sessions: {str(e)}")
             return []
@@ -141,18 +141,18 @@ class StateStore:
             session_file = SESSIONS_DIR / f"{session_id}.json"
             if session_file.exists():
                 session_file.unlink()
-            
+
             # Delete related checkpoints
             StateStore.cleanup_checkpoints(session_id)
-            
+
             # Delete failed items
             failed_file = FAILED_DIR / f"{session_id}_failed.json"
             if failed_file.exists():
                 failed_file.unlink()
-            
+
             logger.info(f"Search session deleted: {session_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to delete search session {session_id}: {str(e)}")
             return False
@@ -169,9 +169,9 @@ class StateStore:
         cursor: Optional[str] = None,
         processed_count: int = 0,
         failed_count: int = 0,
-        checkpoint_type: str = "page"  # 'page' or 'batch'
+        checkpoint_type: str = "page",
         batch_timestamp: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None
+        additional_data: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Save a crawl checkpoint for recovery.
 
@@ -194,9 +194,9 @@ class StateStore:
                 checkpoint_id = f"{session_id}_{platform}_page_{page_number}"
             else:
                 checkpoint_id = f"{session_id}_{platform}_batch_{batch_timestamp or datetime.utcnow().timestamp()}"
-            
+
             checkpoint_file = CHECKPOINTS_DIR / f"{checkpoint_id}.json"
-            
+
             checkpoint_data = {
                 "session_id": session_id,
                 "platform": platform,
@@ -209,20 +209,18 @@ class StateStore:
                 "created_at": datetime.utcnow().isoformat(),
                 "additional_data": additional_data or {},
             }
-            
+
             StateStore._save_json(checkpoint_file, checkpoint_data)
             logger.debug(f"Checkpoint saved: {checkpoint_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to save checkpoint {checkpoint_id}: {str(e)}")
             return False
 
     @staticmethod
     def load_last_checkpoint(
-        session_id: str,
-        platform: Optional[str] = None,
-        checkpoint_type: Optional[str] = None
+        session_id: str, platform: Optional[str] = None, checkpoint_type: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Load the last saved checkpoint for recovery.
 
@@ -236,35 +234,35 @@ class StateStore:
         """
         try:
             checkpoints = []
-            
+
             for checkpoint_file in CHECKPOINTS_DIR.glob("*.json"):
                 checkpoint_data = StateStore._load_json(checkpoint_file)
-                
+
                 # Filter by session_id
                 if checkpoint_data.get("session_id") != session_id:
                     continue
-                
+
                 # Filter by platform
                 if platform and checkpoint_data.get("platform") != platform:
                     continue
-                
+
                 # Filter by type
                 if checkpoint_type and checkpoint_data.get("type") != checkpoint_type:
                     continue
-                
+
                 checkpoints.append((checkpoint_file, checkpoint_data))
-            
+
             if not checkpoints:
                 logger.info(f"No checkpoints found for session {session_id}")
                 return None
-            
+
             # Sort by creation time, get the latest
             checkpoints.sort(key=lambda x: x[1].get("created_at", ""), reverse=True)
             latest_checkpoint = checkpoints[0][1]
-            
+
             logger.info(f"Last checkpoint loaded for session {session_id}: {latest_checkpoint}")
             return latest_checkpoint
-            
+
         except Exception as e:
             logger.error(f"Failed to load checkpoint for session {session_id}: {str(e)}")
             return None
@@ -283,20 +281,20 @@ class StateStore:
         try:
             cutoff_date = datetime.utcnow().timestamp() - (keep_days * 86400)
             deleted_count = 0
-            
+
             for checkpoint_file in CHECKPOINTS_DIR.glob(f"{session_id}_*.json"):
                 checkpoint_data = StateStore._load_json(checkpoint_file)
                 created_at_str = checkpoint_data.get("created_at", "")
-                
+
                 if created_at_str:
                     created_at = datetime.fromisoformat(created_at_str)
                     if created_at.timestamp() < cutoff_date:
                         checkpoint_file.unlink()
                         deleted_count += 1
-            
+
             logger.info(f"Cleaned up {deleted_count} checkpoints for session {session_id}")
             return deleted_count
-            
+
         except Exception as e:
             logger.error(f"Failed to cleanup checkpoints for session {session_id}: {str(e)}")
             return 0
@@ -311,7 +309,7 @@ class StateStore:
         item_id: str,
         item_data: Dict[str, Any],
         error_message: str,
-        retry_count: int = 0
+        retry_count: int = 0,
     ) -> bool:
         """Save a failed item for later retry.
 
@@ -327,12 +325,12 @@ class StateStore:
         """
         try:
             failed_file = FAILED_DIR / f"{session_id}_failed.json"
-            
+
             # Load existing failed items
             failed_items = []
             if failed_file.exists():
                 failed_items = StateStore._load_json(failed_file).get("items", [])
-            
+
             # Update or add failed item
             updated = False
             for item in failed_items:
@@ -342,21 +340,23 @@ class StateStore:
                     item["error_message"] = error_message
                     updated = True
                     break
-            
+
             if not updated:
-                failed_items.append({
-                    "item_id": item_id,
-                    "item_data": item_data,
-                    "error_message": error_message,
-                    "retry_count": retry_count,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "last_failed_at": datetime.utcnow().isoformat(),
-                })
-            
+                failed_items.append(
+                    {
+                        "item_id": item_id,
+                        "item_data": item_data,
+                        "error_message": error_message,
+                        "retry_count": retry_count,
+                        "created_at": datetime.utcnow().isoformat(),
+                        "last_failed_at": datetime.utcnow().isoformat(),
+                    }
+                )
+
             StateStore._save_json(failed_file, {"items": failed_items})
             logger.debug(f"Failed item saved: {item_id} (retries: {retry_count})")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to save failed item {item_id}: {str(e)}")
             return False
@@ -375,10 +375,10 @@ class StateStore:
             failed_file = FAILED_DIR / f"{session_id}_failed.json"
             if not failed_file.exists():
                 return []
-            
+
             failed_data = StateStore._load_json(failed_file)
             return failed_data.get("items", [])
-            
+
         except Exception as e:
             logger.error(f"Failed to load failed items for session {session_id}: {str(e)}")
             return []
@@ -398,17 +398,17 @@ class StateStore:
             failed_file = FAILED_DIR / f"{session_id}_failed.json"
             if not failed_file.exists():
                 return False
-            
+
             failed_data = StateStore._load_json(failed_file)
             items = failed_data.get("items", [])
-            
+
             # Remove the item
             items = [item for item in items if item.get("item_id") != item_id]
-            
+
             StateStore._save_json(failed_file, {"items": items})
             logger.debug(f"Failed item cleared: {item_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to clear failed item {item_id}: {str(e)}")
             return False
@@ -418,10 +418,7 @@ class StateStore:
     # ====================
 
     @staticmethod
-    def save_platform_session(
-        platform: str,
-        session_data: Dict[str, Any]
-    ) -> bool:
+    def save_platform_session(platform: str, session_data: Dict[str, Any]) -> bool:
         """Save platform login/session state (cookies, tokens, etc.).
 
         Args:
@@ -438,13 +435,13 @@ class StateStore:
         """
         try:
             platform_file = PLATFORM_SESSIONS_DIR / f"{platform}_session.json"
-            
+
             session_data["updated_at"] = datetime.utcnow().isoformat()
-            
+
             StateStore._save_json(platform_file, session_data)
             logger.info(f"Platform session saved: {platform}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to save platform session {platform}: {str(e)}")
             return False
@@ -464,9 +461,9 @@ class StateStore:
             if not platform_file.exists():
                 logger.info(f"Platform session not found: {platform}")
                 return None
-            
+
             session_data = StateStore._load_json(platform_file)
-            
+
             # Check if session has expired
             expires_at = session_data.get("expires_at")
             if expires_at:
@@ -474,10 +471,10 @@ class StateStore:
                 if expiry < datetime.utcnow():
                     logger.warning(f"Platform session expired: {platform}")
                     return None
-            
+
             logger.info(f"Platform session loaded: {platform}")
             return session_data
-            
+
         except Exception as e:
             logger.error(f"Failed to load platform session {platform}: {str(e)}")
             return None
@@ -498,7 +495,7 @@ class StateStore:
                 platform_file.unlink()
                 logger.info(f"Platform session deleted: {platform}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to delete platform session {platform}: {str(e)}")
             return False
@@ -510,13 +507,13 @@ class StateStore:
     @staticmethod
     def _load_json(file_path: Path) -> Dict[str, Any]:
         """Load JSON file with error handling."""
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
     @staticmethod
     def _save_json(file_path: Path, data: Dict[str, Any]):
         """Save data to JSON file with error handling."""
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
 

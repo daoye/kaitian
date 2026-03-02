@@ -9,8 +9,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import logging
 
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -153,18 +152,19 @@ class ContentGenerationService:
             # 获取提示模板
             template = get_article_generation_template(request.language)
 
-            # 构建链
-            chain = LLMChain(llm=self.llm, prompt=template)
-
-            # 执行链生成文章
-            logger.info(f"生成文章: {request.topic}")
-            generated_text = chain.run(
+            # 使用 invoke 替代 LLMChain
+            prompt = template.format(
                 topic=request.topic,
                 keywords=keywords_str,
                 target_audience=request.target_audience,
                 tone=tone_desc,
                 length_requirement=length_req,
             )
+
+            # 执行生成文章
+            logger.info(f"生成文章: {request.topic}")
+            response = await self.llm.ainvoke(prompt)
+            generated_text = response.content
 
             # 解析生成的内容
             article = self._parse_generated_article(generated_text, request.keywords)
@@ -216,17 +216,17 @@ class ContentGenerationService:
             # 获取 SEO 优化提示模板
             template = get_seo_optimization_template(request.language)
 
-            # 构建链
-            chain = LLMChain(llm=self.llm, prompt=template)
+            # 使用 invoke 替代 LLMChain
+            keywords_str = format_keywords(request.keywords)
+            prompt = template.format(
+                article=request.article,
+                keywords=keywords_str,
+            )
 
             # 执行优化
             logger.info("执行 SEO 优化")
-            keywords_str = format_keywords(request.keywords)
-            optimization_result = chain.run(
-                article=request.article,
-                keywords=keywords_str,
-                target_audience=request.target_audience,
-            )
+            response = await self.llm.ainvoke(prompt)
+            optimization_result = response.content
 
             # 解析优化结果
             result_data = self._parse_json_response(optimization_result)

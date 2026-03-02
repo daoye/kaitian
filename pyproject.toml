@@ -7,7 +7,7 @@ name = "kaitian"
 version = "0.1.0"
 description = "AI 营销自动化引擎 - 关键词宇宙到 LihuApp 手机审核完整闭环"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
@@ -28,8 +28,8 @@ dependencies = [
     "requests>=2.31.0",
     
     # Publisher - 社交媒体发布
-    "praw>=7.7.0",  # Reddit API
-    "tweepy>=4.14.0",  # Twitter/X API
+    "praw>=7.7.0",
+    "tweepy>=4.14.0",
 ]
 
 [project.optional-dependencies]
@@ -44,8 +44,14 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
-[tool.uv]
-dev-dependencies = []
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.12.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+]
 
 [tool.black]
 line-length = 100

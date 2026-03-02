@@ -4,9 +4,10 @@
 - Reddit: 使用 praw 库
 - Twitter/X: 使用 tweepy 库
 - LinkedIn: 使用官方 API
+- Xiaohongshu (小红书): 使用 Playwright 浏览器自动化
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from app.core.logging import get_logger
 from app.core.config import get_settings
 
@@ -21,6 +22,8 @@ class PublisherService:
         self._reddit_client = None
         self._twitter_client = None
         self._linkedin_client = None
+        self._xiaohongshu_publisher = None
+        self._tieba_publisher = None
 
     # ====================
     # Reddit 发布
@@ -374,6 +377,124 @@ class PublisherService:
             }
 
     # ====================
+    # Xiaohongshu (小红书) 发布 - Playwright 浏览器自动化
+    # ====================
+
+    def _get_xiaohongshu_publisher(self):
+        """获取小红书发布器"""
+        if self._xiaohongshu_publisher is None:
+            try:
+                from app.services.xiaohongshu_publisher import XiaohongshuPlaywrightPublisher
+
+                self._xiaohongshu_publisher = XiaohongshuPlaywrightPublisher(
+                    headless=self.settings.xiaohongshu_headless,
+                    cookie_path=self.settings.xiaohongshu_cookie_path,
+                    slow_mo=self.settings.xiaohongshu_slow_mo,
+                )
+                logger.info("Xiaohongshu publisher initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Xiaohongshu publisher: {str(e)}")
+                raise
+        return self._xiaohongshu_publisher
+
+    async def publish_xiaohongshu_post(
+        self,
+        images: List[str],
+        caption: str,
+        location: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """在小红书发布帖子
+
+        Args:
+            images: 图片文件路径列表（1-9张）
+            caption: 帖子描述（可包含 #话题标签）
+            location: 地点标签（可选）
+
+        Returns:
+            发布结果
+        """
+        try:
+            publisher = self._get_xiaohongshu_publisher()
+            result = await publisher.publish_post(
+                images=images,
+                caption=caption,
+                location=location,
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Failed to publish Xiaohongshu post: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "platform": "xiaohongshu",
+            }
+
+    async def close_xiaohongshu_browser(self):
+        """关闭小红书浏览器实例"""
+        if self._xiaohongshu_publisher:
+            await self._xiaohongshu_publisher.close()
+
+    # ====================
+    # Baidu Tieba (百度贴吧) 发布 - Playwright 浏览器自动化
+    # ====================
+
+    def _get_tieba_publisher(self):
+        """获取贴吧发布器"""
+        if self._tieba_publisher is None:
+            try:
+                from app.services.tieba_publisher import TiebaPlaywrightPublisher
+
+                self._tieba_publisher = TiebaPlaywrightPublisher(
+                    headless=self.settings.xiaohongshu_headless,
+                    slow_mo=self.settings.xiaohongshu_slow_mo,
+                )
+                logger.info("Tieba publisher initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Tieba publisher: {str(e)}")
+                raise
+        return self._tieba_publisher
+
+    async def publish_tieba_post(
+        self,
+        forum_name: str,
+        title: str,
+        content: str,
+        images: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """在百度贴吧发布帖子
+
+        Args:
+            forum_name: 贴吧名称
+            title: 帖子标题
+            content: 帖子内容
+            images: 图片文件路径列表（可选）
+
+        Returns:
+            发布结果
+        """
+        try:
+            publisher = self._get_tieba_publisher()
+            result = await publisher.publish_post(
+                forum_name=forum_name,
+                title=title,
+                content=content,
+                images=images,
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Failed to publish Tieba post: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "platform": "tieba",
+            }
+
+    async def close_tieba_browser(self):
+        """关闭贴吧浏览器实例"""
+        if self._tieba_publisher:
+            await self._tieba_publisher.close()
+
+    # ====================
     # 统一发布接口
     # ====================
 
@@ -383,14 +504,20 @@ class PublisherService:
         content: str,
         title: Optional[str] = None,
         subreddit: Optional[str] = None,
+        images: Optional[List[str]] = None,
+        location: Optional[str] = None,
+        forum_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """统一发布帖子接口
 
         Args:
-            platform: 平台 (reddit, twitter, linkedin)
+            platform: 平台 (reddit, twitter, linkedin, xiaohongshu, tieba)
             content: 帖子内容
-            title: 标题（Reddit 必需）
+            title: 标题（Reddit/Tieba 必需）
             subreddit: Subreddit 名称（Reddit 必需）
+            images: 图片路径列表（Xiaohongshu 必需, Tieba 可选）
+            location: 地点标签（Xiaohongshu 可选）
+            forum_name: 贴吧名称（Tieba 必需）
 
         Returns:
             发布结果
@@ -407,6 +534,22 @@ class PublisherService:
             return await self.publish_twitter_post(content)
         elif platform == "linkedin":
             return await self.publish_linkedin_post(content, title)
+        elif platform == "xiaohongshu":
+            if not images:
+                return {
+                    "success": False,
+                    "error": "Xiaohongshu requires at least one image",
+                    "platform": "xiaohongshu",
+                }
+            return await self.publish_xiaohongshu_post(images, content, location)
+        elif platform == "tieba":
+            if not title or not forum_name:
+                return {
+                    "success": False,
+                    "error": "Tieba requires title and forum_name",
+                    "platform": "tieba",
+                }
+            return await self.publish_tieba_post(forum_name, title, content, images)
         else:
             return {
                 "success": False,

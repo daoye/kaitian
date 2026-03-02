@@ -2,14 +2,17 @@
 """
 KaiTian Startup Script - Manage KaiTian and MediaCrawler services
 
-This script helps you quickly start all services from source code with proper
-configuration and dependency management.
+This script manages services in a monorepo structure:
+- KaiTian API (port 8000) - Main API service
+- MediaCrawler (port 8080) - Social media crawler WebUI
 
 Usage:
     python start.py                    # Start all services
     python start.py --help             # Show help
+    python start.py start              # Start all services
+    python start.py stop               # Stop all services
+    python start.py status             # Show service status
     python start.py --only kaitian     # Start only KaiTian
-    python start.py --clone-deps       # Clone missing dependencies
     python start.py --install-deps     # Install all dependencies
 """
 
@@ -33,34 +36,39 @@ class ServiceManager:
         self.processes = {}
         self.log_dir = self.base_dir / "logs"
         self.log_dir.mkdir(exist_ok=True)
-        self.venv_path = self.base_dir / "venv"
+        self.venv_path = self.base_dir / ".venv"
 
     def _get_venv_python(self) -> str:
-        """Get the path to Python in the virtual environment."""
-        if os.name == "nt":  # Windows
+        if os.name == "nt":
             return str(self.venv_path / "Scripts" / "python.exe")
-        else:  # Linux/macOS
+        else:
             return str(self.venv_path / "bin" / "python")
 
     def _get_uv_path(self) -> str:
-        """Get the path to uv executable."""
         return "uv"
 
     def _init_services_config(self):
-        """Initialize service configurations."""
-        # Service configurations
         self.services_config = {
             "kaitian": {
                 "path": self.base_dir / ".",
                 "name": "KaiTian",
                 "description": "KaiTian API Service",
                 "port": 8000,
-                "cmd": [self._get_venv_python(), "main.py"],
+                "cmd": [
+                    self._get_uv_path(),
+                    "run",
+                    "uvicorn",
+                    "main:app",
+                    "--port",
+                    "8000",
+                    "--host",
+                    "0.0.0.0",
+                ],
                 "env": self._get_kaitian_env(),
                 "startup_msg": "Application startup complete",
             },
             "mediacrawler": {
-                "path": self.base_dir / "MediaCrawler",
+                "path": self.base_dir / "packages" / "MediaCrawler",
                 "name": "MediaCrawler",
                 "description": "MediaCrawler Service - 小红书、抖音、快手、B站、微博、贴吧、知乎爬虫",
                 "port": 8080,
@@ -132,17 +140,14 @@ class ServiceManager:
                 return False
 
         elif service == "mediacrawler":
-            try:
-                import media_crawler
-
-                return True
-            except ImportError:
-                return False
+            service_path = config["path"]
+            venv_path = service_path / ".venv"
+            return venv_path.exists()
 
         return False
 
     def clone_repository(self, service: str) -> bool:
-        """Clone repository if it doesn't exist."""
+        """Clone repository if it doesn't exist - for submodule, use git submodule commands."""
         config = self.services_config.get(service)
         if not config:
             return False
@@ -152,29 +157,30 @@ class ServiceManager:
             print(f"✓ {config['name']} already exists at {service_path}")
             return True
 
-        print(f"\n📥 Cloning {config['name']}...")
-
-        urls = {
-            "mediacrawler": "https://github.com/NanmiCoder/MediaCrawler.git",
-        }
-
-        if service not in urls:
-            print(f"✗ Cannot clone {service} - no repository URL configured")
-            return False
-
-        try:
-            cmd = ["git", "clone", urls[service], str(service_path)]
-            subprocess.run(cmd, check=True, capture_output=True)
-            print(f"✓ {config['name']} cloned successfully to {service_path}")
-
-            # For MediaCrawler, copy example config
-            if service == "mediacrawler":
+        if service == "mediacrawler":
+            print(f"\n📥 Initializing MediaCrawler submodule...")
+            try:
+                subprocess.run(
+                    [
+                        "git",
+                        "submodule",
+                        "update",
+                        "--init",
+                        "--recursive",
+                        "packages/MediaCrawler",
+                    ],
+                    cwd=self.base_dir,
+                    check=True,
+                    capture_output=True,
+                )
+                print(f"✓ MediaCrawler submodule initialized")
                 self._setup_mediacrawler_config(service_path)
+                return True
+            except subprocess.CalledProcessError as e:
+                print(f"✗ Failed to initialize MediaCrawler submodule: {e}")
+                return False
 
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"✗ Failed to clone {config['name']}: {e}")
-            return False
+        return False
 
     def _setup_mediacrawler_config(self, service_path: Path):
         """Setup MediaCrawler configuration files."""
@@ -277,11 +283,20 @@ class ServiceManager:
                     "port": config["port"],
                 }
                 print(f"✓ {config['name']} started (PID: {process.pid})")
-                return True
+
+            self._save_pids()
+            return True
 
         except Exception as e:
             print(f"✗ Failed to start {config['name']}: {e}")
             return False
+
+    def _save_pids(self):
+        """Save PIDs of running services to file."""
+        pid_file = self.log_dir / "services.pid"
+        pids = {service: info["process"].pid for service, info in self.processes.items()}
+        with open(pid_file, "w") as f:
+            json.dump(pids, f)
 
     def wait_for_service(self, service: str, timeout: int = 30) -> bool:
         """Wait for service to be ready."""
@@ -423,17 +438,18 @@ class ServiceManager:
 
     def run(self, args: argparse.Namespace):
         """Run the startup manager."""
-        # Setup virtual environment first
         if not self.setup_venv():
             print("\n✗ Failed to setup virtual environment")
             sys.exit(1)
 
-        # Initialize service configurations after venv path is determined
         self._init_services_config()
 
-        # Handle specific commands
-        if args.clone_deps:
-            self.clone_repository("mediacrawler")
+        if args.command == "stop":
+            self.stop_services()
+            return
+
+        if args.command == "status":
+            self.show_status()
             return
 
         if args.install_deps:
@@ -441,13 +457,11 @@ class ServiceManager:
                 self.install_dependencies(service)
             return
 
-        # Start services
         services = args.only.split(",") if args.only else None
         if not self.start_all_services(services):
             print("\n✗ Failed to start services")
             sys.exit(1)
 
-        # Print information
         self.print_status()
         self.print_endpoints()
 
@@ -457,13 +471,12 @@ class ServiceManager:
         print("\n💡 Tips:")
         print("  - View logs: tail -f logs/{service}.log")
         print("  - KaiTian API docs: http://localhost:8000/docs")
+        print("  - Stop services: python start.py stop")
         print("  - Press Ctrl+C to stop all services\n")
 
-        # Keep running and handle shutdown
         try:
             while True:
                 time.sleep(1)
-                # Check if any process died
                 for service, info in list(self.processes.items()):
                     process = info["process"]
                     if process.poll() is not None:
@@ -474,6 +487,70 @@ class ServiceManager:
             self.cleanup()
             sys.exit(0)
 
+    def stop_services(self):
+        """Stop all running services."""
+        print("=" * 60)
+        print("🛑 Stopping services...")
+        print("=" * 60)
+
+        pid_file = self.log_dir / "services.pid"
+        if not pid_file.exists():
+            print("No running services found (no PID file)")
+            return
+
+        try:
+            with open(pid_file, "r") as f:
+                pids = json.load(f)
+
+            for service, pid in pids.items():
+                try:
+                    import signal as sig
+
+                    os.kill(pid, sig.SIGTERM)
+                    print(f"✓ Stopped {service} (PID: {pid})")
+                except ProcessLookupError:
+                    print(f"⚠ {service} (PID: {pid}) not running")
+                except Exception as e:
+                    print(f"✗ Failed to stop {service}: {e}")
+
+            pid_file.unlink()
+            print("\n✓ All services stopped")
+
+        except Exception as e:
+            print(f"✗ Error stopping services: {e}")
+
+    def show_status(self):
+        """Show status of all services."""
+        print("=" * 60)
+        print("📊 Service Status")
+        print("=" * 60)
+
+        pid_file = self.log_dir / "services.pid"
+        if pid_file.exists():
+            with open(pid_file, "r") as f:
+                pids = json.load(f)
+
+            for service, pid in pids.items():
+                try:
+                    import signal as sig
+
+                    os.kill(pid, 0)
+                    print(f"  {service}: ✓ Running (PID: {pid})")
+                except ProcessLookupError:
+                    print(f"  {service}: ✗ Stopped (PID: {pid} not found)")
+                except Exception as e:
+                    print(f"  {service}: ? Unknown ({e})")
+        else:
+            print("  No running services found")
+
+        print()
+        for service, config in self.services_config.items():
+            service_path = config["path"]
+            if service_path.exists():
+                print(f"  {service}: installed at {service_path}")
+            else:
+                print(f"  {service}: not installed")
+
 
 def main():
     """Main entry point."""
@@ -482,23 +559,30 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python start.py                    # Start all services
-  python start.py --only kaitian     # Start only KaiTian
-  python start.py --clone-deps       # Clone missing repositories
-  python start.py --install-deps     # Install dependencies
-  python start.py --only kaitian,mediacrawler  # Start specific services
+    python start.py                    # Start all services
+    python start.py start              # Start all services
+    python start.py stop               # Stop all services
+    python start.py status             # Show service status
+    python start.py --only kaitian     # Start only KaiTian
+    python start.py --install-deps     # Install dependencies
+
+Monorepo Structure:
+    kaitian/                # Main API service
+    packages/MediaCrawler/  # Social media crawler (submodule)
         """,
     )
 
     parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["start", "stop", "status"],
+        default="start",
+        help="Command to execute: start (default), stop, or status",
+    )
+    parser.add_argument(
         "--only",
         help="Comma-separated list of services to start (kaitian, mediacrawler)",
         type=str,
-    )
-    parser.add_argument(
-        "--clone-deps",
-        action="store_true",
-        help="Clone required repositories",
     )
     parser.add_argument(
         "--install-deps",

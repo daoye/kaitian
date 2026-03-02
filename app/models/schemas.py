@@ -28,14 +28,6 @@ class SourcePlatformEnum(str, Enum):
     HACKERNEWS = "hackernews"
 
 
-class PublishPlatformEnum(str, Enum):
-    """Enumeration for target publish platforms."""
-
-    REDDIT = "reddit"
-    TWITTER = "twitter"
-    LINKEDIN = "linkedin"
-
-
 class RedditPostBase(BaseModel):
     """Base model for Reddit posts."""
 
@@ -286,16 +278,23 @@ class PublishPlatformEnum(str, Enum):
     REDDIT = "reddit"
     TWITTER = "twitter"
     LINKEDIN = "linkedin"
+    XIAOHONGSHU = "xiaohongshu"
+    TIEBA = "tieba"
 
 
 class PublishPostRequest(BaseModel):
     """发布帖子请求"""
 
     platform: PublishPlatformEnum = Field(..., description="目标平台")
-    title: Optional[str] = Field(default=None, description="标题（Reddit必需）")
+    title: Optional[str] = Field(default=None, description="标题（Reddit/Tieba必需）")
     content: str = Field(..., description="帖子内容")
     subreddit: Optional[str] = Field(default=None, description="Subreddit名称（Reddit专用）")
     media_urls: Optional[List[str]] = Field(default=None, description="媒体URL列表")
+    images: Optional[List[str]] = Field(
+        default=None, description="图片路径列表（Xiaohongshu必需,Tieba可选）"
+    )
+    location: Optional[str] = Field(default=None, description="地点标签（Xiaohongshu可选）")
+    forum_name: Optional[str] = Field(default=None, description="贴吧名称（Tieba必需）")
 
 
 class PublishPostResponse(BaseModel):

@@ -2,10 +2,8 @@
 
 import json
 from typing import Dict, List, Optional, Any
-from langchain.agents import AgentExecutor, create_react_agent
 from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.tools import Tool
+from langchain_core.prompts import PromptTemplate
 
 from app.core.logging import get_logger
 from app.core.config import get_settings
@@ -22,12 +20,17 @@ class LangChainAgentService:
 
     def __init__(self):
         self.settings = get_settings()
-        # 初始化 LLM
-        self.llm = ChatOpenAI(
-            api_key=self.settings.openai_api_key,
-            model=self.settings.openai_model,
-            temperature=self.settings.openai_temperature,
-        )
+        self._llm = None
+
+    @property
+    def llm(self):
+        if self._llm is None:
+            self._llm = ChatOpenAI(
+                api_key=self.settings.openai_api_key,
+                model=self.settings.openai_model,
+                temperature=self.settings.openai_temperature,
+            )
+        return self._llm
 
     def evaluate_relevance(
         self,
@@ -58,17 +61,16 @@ class LangChainAgentService:
             )
 
             # 使用 LLM 进行评判
-            from langchain.chains import LLMChain
-
-            chain = LLMChain(llm=self.llm, prompt=prompt)
-            response = chain.run(
+            formatted_prompt = prompt.format(
                 content=content,
                 product_description=product_description,
                 product_name=product_name or "我们的产品",
             )
+            response = self.llm.invoke(formatted_prompt)
+            result_text = response.content
 
             # 解析响应
-            result = self._parse_evaluation_response(response)
+            result = self._parse_evaluation_response(result_text)
 
             logger.info(f"Evaluated relevance: {result}")
 
@@ -122,24 +124,22 @@ class LangChainAgentService:
                 template=template,
             )
 
-            # 使用 LLM 生成回复
-            from langchain.chains import LLMChain
-
-            chain = LLMChain(llm=self.llm, prompt=prompt)
-
             product_info_str = (
                 json.dumps(product_info, ensure_ascii=False) if product_info else "未提供"
             )
 
-            response = chain.run(
+            # 使用 LLM 生成回复
+            formatted_prompt = prompt.format(
                 original_content=original_content,
                 tone=tone,
                 max_length=max_length,
                 platform=platform,
                 product_info=product_info_str,
             )
+            response = self.llm.invoke(formatted_prompt)
+            reply_text = response.content
 
-            logger.info(f"Generated reply (length: {len(response.split())} words)")
+            logger.info(f"Generated reply (length: {len(reply_text.split())} words)")
 
             return {
                 "success": True,
@@ -160,66 +160,28 @@ class LangChainAgentService:
         self,
         product_info: Dict[str, Any],
         language: str = "zh",
-    ) -> AgentExecutor:
-        """创建 LangChain Agent。
+    ) -> Dict[str, Any]:
+        """创建简化版 Agent 配置。
 
         Args:
             product_info: 产品信息
             language: 语言
 
         Returns:
-            AgentExecutor 实例
+            Agent 配置字典
         """
-        # 定义工具
-        tools = [
-            Tool(
-                name="EvaluateRelevance",
-                func=self._evaluate_with_agent,
-                description="评判内容是否与产品相关",
-            ),
-            Tool(
-                name="GenerateReply",
-                func=self._generate_with_agent,
-                description="为帖子生成回复",
-            ),
-        ]
-
-        # 创建 Agent
-        agent_prompt = PromptTemplate.from_template(
-            """你是一个营销 AI 助手，帮助评判内容相关性并生成回复。
-
-产品信息：{product_info}
-
-工具：{tools}
-
-问题：{input}
-
-思考过程：{agent_scratchpad}"""
-        )
-
-        agent = create_react_agent(
-            llm=self.llm,
-            tools=tools,
-            prompt=agent_prompt,
-        )
-
-        return AgentExecutor(
-            agent=agent,
-            tools=tools,
-            verbose=True,
-            handle_parsing_errors=True,
-        )
+        return {
+            "product_info": product_info,
+            "language": language,
+            "llm": self.llm,
+        }
 
     def _evaluate_with_agent(self, input_str: str) -> str:
         """Agent 工具函数 - 评判相关性。"""
-        # 解析输入并调用评判逻辑
-        # 这是一个简化实现
         return "相关性评判完成"
 
     def _generate_with_agent(self, input_str: str) -> str:
         """Agent 工具函数 - 生成回复。"""
-        # 解析输入并调用生成逻辑
-        # 这是一个简化实现
         return "回复生成完成"
 
     @staticmethod

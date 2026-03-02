@@ -1,0 +1,3 @@
+[submodule "packages/MediaCrawler"]
+	path = packages/MediaCrawler
+	url = git@github.com:daoye/MediaCrawler.git

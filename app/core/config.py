@@ -101,6 +101,22 @@ class Settings(BaseSettings):
     linkedin_access_token: Optional[str] = None
     linkedin_person_urn: Optional[str] = None
 
+    # ====================
+    # Xiaohongshu (小红书) 配置 - Playwright 浏览器自动化
+    # ====================
+
+    # 是否使用无头模式（建议首次登录时设为 False 以便手动扫码）
+    xiaohongshu_headless: bool = True
+
+    # Cookie 持久化路径
+    xiaohongshu_cookie_path: Optional[str] = None
+
+    # 浏览器操作间隔（毫秒），用于模拟人类行为
+    xiaohongshu_slow_mo: int = 100
+
+    # 登录超时时间（秒）
+    xiaohongshu_login_timeout: int = 120
+
     class Config:
         env_file = ".env"
         case_sensitive = False

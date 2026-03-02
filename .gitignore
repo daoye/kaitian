@@ -87,5 +87,24 @@ logs/
 # PyCharm
 #.idea/
 
+# ============================================================================
+# Monorepo - MediaCrawler submodule
+# ============================================================================
+
+# MediaCrawler data directories (generated at runtime)
+packages/MediaCrawler/data/
+packages/MediaCrawler/browser_data/
+
+# MediaCrawler config (user-specific, copy from .env.example)
+packages/MediaCrawler/.env
+
+# MediaCrawler cache
+packages/MediaCrawler/cache/
+packages/MediaCrawler/*.db
+packages/MediaCrawler/*.sqlite
+
+# Keep .env.example in submodule
+!packages/MediaCrawler/.env.example
+
 # Visual Studio Code
 # .vscode/

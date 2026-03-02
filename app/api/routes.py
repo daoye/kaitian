@@ -468,17 +468,23 @@ async def publish_post(
     content: str,
     title: Optional[str] = None,
     subreddit: Optional[str] = None,
+    images: Optional[List[str]] = None,
+    location: Optional[str] = None,
+    forum_name: Optional[str] = None,
 ):
     """
     发布帖子到社交媒体平台。
 
-    支持平台：Reddit, Twitter, LinkedIn
+    支持平台：Reddit, Twitter, LinkedIn, Xiaohongshu (小红书), Tieba (百度贴吧)
 
     Args:
-        platform: 目标平台 (reddit, twitter, linkedin)
+        platform: 目标平台 (reddit, twitter, linkedin, xiaohongshu, tieba)
         content: 帖子内容
-        title: 标题（Reddit 必需）
+        title: 标题（Reddit/Tieba 必需）
         subreddit: Subreddit 名称（Reddit 必需）
+        images: 图片路径列表（Xiaohongshu 必需, Tieba 可选）
+        location: 地点标签（Xiaohongshu 可选）
+        forum_name: 贴吧名称（Tieba 必需）
 
     Returns:
         {
@@ -497,6 +503,9 @@ async def publish_post(
             content=content,
             title=title,
             subreddit=subreddit,
+            images=images,
+            location=location,
+            forum_name=forum_name,
         )
         return result
     except Exception as e:

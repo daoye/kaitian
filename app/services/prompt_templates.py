@@ -3,8 +3,8 @@
 This module defines all prompt templates used in the article generation chains.
 """
 
-from langchain.prompts import PromptTemplate, ChatPromptTemplate
-from langchain.schema import SystemMessage, HumanMessage
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
+from langchain_core.messages import SystemMessage, HumanMessage
 
 # ============================================================================
 # 文章生成 Prompt 模板
