@@ -62,8 +62,7 @@ python start.py --install-deps
 
 # 或手动安装
 # KaiTian
-source venv/bin/activate
-pip install -e .
+uv sync
 
 # MediaCrawler
 cd packages/MediaCrawler

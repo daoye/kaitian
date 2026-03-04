@@ -6,6 +6,8 @@ This script manages services in a monorepo structure:
 - KaiTian API (port 8000) - Main API service
 - MediaCrawler (port 8080) - Social media crawler WebUI
 
+All services use uv for dependency management.
+
 Usage:
     python start.py                    # Start all services
     python start.py --help             # Show help
@@ -28,7 +30,7 @@ import json
 
 
 class ServiceManager:
-    """Manage startup of multiple services."""
+    """Manage startup of multiple services using uv for dependency management."""
 
     def __init__(self, base_dir: str = "."):
         self.base_dir = Path(base_dir).resolve()
@@ -36,13 +38,6 @@ class ServiceManager:
         self.processes = {}
         self.log_dir = self.base_dir / "logs"
         self.log_dir.mkdir(exist_ok=True)
-        self.venv_path = self.base_dir / ".venv"
-
-    def _get_venv_python(self) -> str:
-        if os.name == "nt":
-            return str(self.venv_path / "Scripts" / "python.exe")
-        else:
-            return str(self.venv_path / "bin" / "python")
 
     def _get_uv_path(self) -> str:
         return "uv"
@@ -87,23 +82,6 @@ class ServiceManager:
             },
         }
 
-    def setup_venv(self) -> bool:
-        """Setup and activate virtual environment."""
-        if self.venv_path.exists():
-            print(f"✓ Virtual environment already exists at {self.venv_path}")
-            return True
-
-        print(f"📦 Creating virtual environment at {self.venv_path}...")
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "venv", str(self.venv_path)], check=True, capture_output=True
-            )
-            print(f"✓ Virtual environment created successfully")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"✗ Failed to create virtual environment: {e}")
-            return False
-
     def _get_kaitian_env(self) -> dict:
         """Get environment variables for KaiTian."""
         env = os.environ.copy()
@@ -124,27 +102,20 @@ class ServiceManager:
         return env
 
     def check_dependencies(self, service: str) -> bool:
-        """Check if service dependencies are installed."""
         config = self.services_config.get(service)
         if not config:
             return False
 
-        if service == "kaitian":
-            try:
-                import fastapi
-                import uvicorn
-                import sqlalchemy
-
-                return True
-            except ImportError:
-                return False
-
-        elif service == "mediacrawler":
-            service_path = config["path"]
-            venv_path = service_path / ".venv"
-            return venv_path.exists()
-
-        return False
+        try:
+            result = subprocess.run(
+                ["uv", "sync", "--dry-run"],
+                cwd=config["path"],
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0 and "Would install" not in result.stdout
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
 
     def clone_repository(self, service: str) -> bool:
         """Clone repository if it doesn't exist - for submodule, use git submodule commands."""
@@ -219,9 +190,8 @@ class ServiceManager:
 
         try:
             if service == "kaitian":
-                # Install Python dependencies using venv Python
-                venv_python = self._get_venv_python()
-                cmd = [venv_python, "-m", "pip", "install", "-r", "requirements.txt"]
+                # Install KaiTian dependencies using uv
+                cmd = ["uv", "sync"]
                 subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
                 print(f"✓ {config['name']} dependencies installed")
                 return True
@@ -437,11 +407,6 @@ class ServiceManager:
                     process.kill()
 
     def run(self, args: argparse.Namespace):
-        """Run the startup manager."""
-        if not self.setup_venv():
-            print("\n✗ Failed to setup virtual environment")
-            sys.exit(1)
-
         self._init_services_config()
 
         if args.command == "stop":

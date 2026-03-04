@@ -3,23 +3,20 @@
 ## 🚀 一行命令启动
 
 ```bash
-# Bash 脚本（自动创建和使用虚拟环境）
-./start.sh
-
-# Python 脚本（自动创建和使用虚拟环境）
+# Python 脚本（使用 uv 管理依赖）
 python start.py
 
 # 手动启动（2 个不同的终端）
-python main.py                    # Terminal 1: KaiTian
+uv run uvicorn main:app --port 8000   # Terminal 1: KaiTian
 cd MediaCrawler && uv run uvicorn api.main:app --port 8080  # Terminal 2
 ```
 
-## 💡 虚拟环境说明
+## 💡 依赖管理说明
 
-- 启动脚本自动创建虚拟环境在 `./venv` 目录
-- 无需手动激活虚拟环境
-- 所有依赖自动安装到虚拟环境中
-- 支持多 Python 版本隔离
+- 所有服务使用 uv 统一管理依赖
+- 无需手动创建或激活虚拟环境
+- uv 自动管理虚拟环境和依赖安装
+- 首次运行会自动安装所需依赖
 
 ## 📍 服务端点
 
