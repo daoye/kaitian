@@ -94,27 +94,6 @@ class ReplyGenerationResponse(BaseModel):
     confidence: float
 
 
-class PublishRequest(BaseModel):
-    """Request model for publishing replies."""
-
-    post_id: str
-    platform: PublishPlatformEnum
-    reply_text: str
-    target_url: str
-    metadata: Optional[dict] = None
-
-
-class PublishResponse(BaseModel):
-    """Response model for publishing."""
-
-    post_id: str
-    platform: PublishPlatformEnum
-    success: bool
-    published_id: Optional[str] = None
-    error_message: Optional[str] = None
-    published_at: datetime
-
-
 class HealthCheckResponse(BaseModel):
     """Response model for health check."""
 

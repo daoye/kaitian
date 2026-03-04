@@ -1,15 +1,17 @@
 """Main entry point for KaiTian application."""
 
-import uvicorn
 from app.core.app import create_app
-from app.core.config import get_settings
+
+# Create app instance for uvicorn
+app = create_app()
 
 
 def main():
     """Run the KaiTian application."""
-    settings = get_settings()
-    app = create_app()
+    import uvicorn
+    from app.core.config import get_settings
 
+    settings = get_settings()
     uvicorn.run(
         app,
         host=settings.host,
