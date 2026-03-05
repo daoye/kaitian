@@ -7,7 +7,7 @@
 - Cookie 会话持久化（避免重复登录）
 - 帖子标题和内容
 - 图片上传支持
-- 反检测措施
+- CDP 模式支持（使用真实 Chrome 浏览器，反检测效果更好）
 
 使用方式:
     publisher = TiebaPlaywrightPublisher()
@@ -22,6 +22,7 @@
 import asyncio
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -41,6 +42,7 @@ class TiebaPlaywrightPublisher:
     - 帖子标题和内容
     - 图片上传
     - Cookie 持久化
+    - CDP 模式（使用真实 Chrome 浏览器）
     """
 
     TIEBA_URL = "https://tieba.baidu.com"
@@ -53,11 +55,16 @@ class TiebaPlaywrightPublisher:
     COOKIE_DIR = Path("data/platform_sessions")
     COOKIE_FILE = COOKIE_DIR / "tieba_cookies.json"
 
+    # CDP 模式配置
+    CDP_DEBUG_PORT = 9222
+    CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
     def __init__(
         self,
         headless: bool = True,
         cookie_path: Optional[str] = None,
         slow_mo: int = 100,
+        enable_cdp: bool = True,
     ):
         self.settings = get_settings()
         self.headless = headless
@@ -66,6 +73,8 @@ class TiebaPlaywrightPublisher:
         self.context = None
         self.page = None
         self.playwright = None
+        self.enable_cdp = enable_cdp
+        self.chrome_process = None
 
         if cookie_path:
             self.cookie_file = Path(cookie_path)
@@ -74,7 +83,7 @@ class TiebaPlaywrightPublisher:
 
         self.cookie_file.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"TiebaPlaywrightPublisher initialized, headless={headless}")
+        logger.info(f"TiebaPlaywrightPublisher initialized, headless={headless}, cdp={enable_cdp}")
 
     async def _ensure_browser(self) -> None:
         if self.browser is None:
@@ -82,17 +91,70 @@ class TiebaPlaywrightPublisher:
 
             self.playwright = await async_playwright().start()
 
-            self.browser = await self.playwright.chromium.launch(
-                headless=self.headless,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-infobars",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                ],
-            )
+            if self.enable_cdp:
+                self.browser = await self._launch_cdp_browser()
+            else:
+                self.browser = await self.playwright.chromium.launch(
+                    headless=self.headless,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-infobars",
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                    ],
+                )
 
             logger.info("Browser launched successfully")
+
+    async def _launch_cdp_browser(self):
+        """启动 CDP 模式浏览器（使用真实 Chrome）。"""
+        import socket
+
+        port = self.CDP_DEBUG_PORT
+        while True:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect(("127.0.0.1", port))
+                port += 1
+            except ConnectionRefusedError:
+                break
+
+        logger.info(f"Starting Chrome with CDP on port {port}")
+
+        user_data_dir = Path.home() / ".kaitian_chrome_profile"
+        user_data_dir.mkdir(parents=True, exist_ok=True)
+
+        chrome_cmd = [
+            self.CHROME_PATH,
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={user_data_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-background-networking",
+            "--disable-client-side-phishing-detection",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-sync",
+            "--disable-translate",
+            "--metrics-recording-only",
+            "--safebrowsing-disable-auto-update",
+        ]
+
+        self.chrome_process = subprocess.Popen(
+            chrome_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        await asyncio.sleep(3)
+
+        cdp_url = f"http://127.0.0.1:{port}"
+        logger.info(f"Connecting to Chrome CDP: {cdp_url}")
+
+        browser = await self.playwright.chromium.connect_over_cdp(cdp_url)
+        logger.info("Connected to Chrome via CDP")
+
+        return browser
 
     async def _ensure_context(self) -> None:
         await self._ensure_browser()
@@ -145,37 +207,53 @@ class TiebaPlaywrightPublisher:
 
         try:
             await self.page.goto(self.TIEBA_URL, wait_until="networkidle")
+            await asyncio.sleep(2)
 
-            current_cookies = await self.context.cookies()
-            cookie_dict = {c["name"]: c["value"] for c in current_cookies}
+            current_url = self.page.url
+            page_title = await self.page.title()
 
-            stoken = cookie_dict.get("STOKEN")
-            ptoken = cookie_dict.get("PTOKEN")
-            bduss = cookie_dict.get("BDUSS")
+            logger.info(f"Current URL: {current_url}")
+            logger.info(f"Page title: {page_title}")
 
-            if stoken or ptoken or bduss:
-                logger.info("Login verified - found Baidu auth cookies")
-                return True
+            if "wappass.baidu.com" in current_url or "captcha" in current_url:
+                logger.info("Detected captcha/verification page - need user action")
+                return False
 
-            login_selectors = [
-                ".u_login",
-                ".login-btn",
-                'a[href*="passport"]',
-                ".user_info",
+            if "passport.baidu.com" in current_url or "login" in current_url.lower():
+                logger.info("Detected login page - need user to login")
+                return False
+
+            login_user_selectors = [
+                ".u_login_item",
+                ".user_name",
+                ".u_logout",
+                '[class*="username"]',
+                '[class*="user-name"]',
+                ".nav_login_wap",
             ]
 
-            for selector in login_selectors:
+            for selector in login_user_selectors:
                 try:
-                    element = await self.page.wait_for_selector(selector, timeout=3000)
+                    element = await self.page.query_selector(selector)
                     if element:
-                        is_login = "login" not in selector.lower() or "user" in selector.lower()
-                        if is_login:
-                            logger.info("Login verified - found user elements")
+                        text = await element.text_content()
+                        if text and len(text.strip()) > 0 and "登录" not in text:
+                            logger.info(f"Login verified - found user element: {selector}")
                             return True
                 except Exception:
-                    continue
+                    pass
 
-            logger.info("Not logged in")
+            try:
+                login_btn = await self.page.query_selector(
+                    'a[href*="passport"], .login_btn, text="登录"'
+                )
+                if login_btn:
+                    logger.info("Found login button - not logged in")
+                    return False
+            except Exception:
+                pass
+
+            logger.info("Login status unclear - assuming not logged in")
             return False
 
         except Exception as e:
@@ -189,27 +267,58 @@ class TiebaPlaywrightPublisher:
         try:
             await self.page.goto(self.TIEBA_URL, wait_until="networkidle")
 
-            logger.info("Waiting for user login (QR code or phone)...")
+            logger.info("Waiting for user login...")
             print("\n" + "=" * 60)
-            print("请在浏览器中完成百度登录（扫描二维码或账号密码登录）")
+            print("请在浏览器中完成百度登录（验证码 + 扫码/账号密码）")
             print("=" * 60 + "\n")
 
             start_time = time.time()
 
             while time.time() - start_time < timeout / 1000:
-                current_cookies = await self.context.cookies()
-                cookie_dict = {c["name"]: c["value"] for c in current_cookies}
+                current_url = self.page.url
 
-                stoken = cookie_dict.get("STOKEN")
-                ptoken = cookie_dict.get("PTOKEN")
-                bduss = cookie_dict.get("BDUSS")
+                if "wappass.baidu.com" in current_url or "captcha" in current_url:
+                    logger.info("On verification page - waiting for user to complete...")
+                    await asyncio.sleep(2)
+                    continue
 
-                if stoken or ptoken or bduss:
-                    logger.info("Login successful - found auth cookies")
-                    await self._save_cookies()
-                    return True
+                if "passport.baidu.com" in current_url:
+                    logger.info("On login page - waiting for user to login...")
+                    await asyncio.sleep(2)
+                    continue
 
-                await asyncio.sleep(1)
+                if "tieba.baidu.com" in current_url and "passport" not in current_url:
+                    login_user_selectors = [
+                        ".u_login_item",
+                        ".user_name",
+                        ".u_logout",
+                        '[class*="username"]',
+                    ]
+
+                    for selector in login_user_selectors:
+                        try:
+                            element = await self.page.query_selector(selector)
+                            if element:
+                                text = await element.text_content()
+                                if text and len(text.strip()) > 0 and "登录" not in text:
+                                    logger.info("Login successful - found user element")
+                                    await self._save_cookies()
+                                    return True
+                        except Exception:
+                            pass
+
+                    try:
+                        login_btn = await self.page.query_selector(
+                            'a[href*="passport"], .login_btn'
+                        )
+                        if not login_btn:
+                            logger.info("Login successful - no login button found")
+                            await self._save_cookies()
+                            return True
+                    except Exception:
+                        pass
+
+                await asyncio.sleep(2)
 
             logger.warning("Login timeout")
             return False
@@ -237,23 +346,24 @@ class TiebaPlaywrightPublisher:
     async def _click_post_button(self) -> bool:
         try:
             post_btn_selectors = [
-                'a[href*="post"]',
-                ".post_btn",
-                "#new_topic_btn",
-                "a.j_post_btn",
-                ".tb_btn_create",
-                "text=发帖",
+                "a.add_thread_btn",
+                "a[title='发表新贴']",
+                ".post_head_btn.add_thread_btn",
+                "a:has-text('发表新贴')",
             ]
 
             for selector in post_btn_selectors:
                 try:
                     btn = await self.page.wait_for_selector(selector, timeout=5000)
                     if btn:
-                        await btn.click()
-                        logger.info(f"Clicked post button: {selector}")
-                        await asyncio.sleep(1)
-                        return True
-                except Exception:
+                        is_visible = await btn.is_visible()
+                        if is_visible:
+                            await btn.click()
+                            logger.info(f"Clicked post button: {selector}")
+                            await asyncio.sleep(2)
+                            return True
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
                     continue
 
             logger.error("Could not find post button")
@@ -266,11 +376,11 @@ class TiebaPlaywrightPublisher:
     async def _fill_title(self, title: str) -> bool:
         try:
             title_selectors = [
-                "#title",
-                'input[name="title"]',
-                'input[placeholder*="标题"]',
-                ".title_input",
-                "#tb_title",
+                "input.title_input",
+                "#tb_rich_poster_title",
+                "input[placeholder*='标题']",
+                ".title_container input",
+                "input.editor_title",
             ]
 
             for selector in title_selectors:
@@ -292,27 +402,74 @@ class TiebaPlaywrightPublisher:
             logger.error(f"Failed to fill title: {e}")
             return False
 
+    async def _close_popups(self) -> None:
+        close_selectors = [
+            ".ui_bubble_closed",
+            ".j_close",
+            ".close-btn",
+            ".close_msg_tip",
+            ".dialog_close",
+            ".modal-close",
+            "[class*='close']",
+        ]
+
+        for selector in close_selectors:
+            try:
+                close_btns = await self.page.query_selector_all(selector)
+                for close_btn in close_btns:
+                    is_visible = await close_btn.is_visible()
+                    if is_visible:
+                        await close_btn.click(force=True)
+                        await asyncio.sleep(0.3)
+                        logger.info(f"Closed popup: {selector}")
+            except Exception:
+                pass
+
     async def _fill_content(self, content: str) -> bool:
         try:
+            await asyncio.sleep(1)
+            await self._close_popups()
+
+            escaped_content = (
+                content.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "<br>")
+            )
+            try:
+                await self.page.evaluate(f"""
+                    const editor = document.querySelector('#ueditor_replace');
+                    if (editor) {{
+                        editor.innerHTML = '<p>{escaped_content}</p>';
+                        editor.focus();
+                    }}
+                """)
+                await asyncio.sleep(0.5)
+                logger.info(f"Content set via JavaScript: {content[:30]}...")
+                return True
+            except Exception as e:
+                logger.warning(f"JavaScript content set failed: {e}")
+
             content_selectors = [
                 "#ueditor_replace",
-                ".editor_content",
-                'textarea[placeholder*="内容"]',
-                ".content_input",
-                "#tb_editor",
-                'div[contenteditable="true"]',
+                ".edui-body-container",
+                "div[contenteditable='true']",
             ]
 
             for selector in content_selectors:
                 try:
                     content_input = await self.page.wait_for_selector(selector, timeout=5000)
                     if content_input:
-                        await content_input.click()
+                        await content_input.scroll_into_view_if_needed()
                         await asyncio.sleep(0.3)
-                        await content_input.fill(content)
+                        await content_input.click(force=True)
+                        await asyncio.sleep(0.5)
+                        await self._close_popups()
+                        await content_input.focus()
+                        await asyncio.sleep(0.3)
+                        await self.page.keyboard.type(content, delay=20)
+                        await asyncio.sleep(0.5)
                         logger.info(f"Content filled: {content[:30]}...")
                         return True
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
                     continue
 
             logger.error("Could not find content input")
@@ -367,24 +524,24 @@ class TiebaPlaywrightPublisher:
     async def _submit_post(self) -> bool:
         try:
             submit_selectors = [
-                'button[type="submit"]',
-                ".submit_btn",
-                "#submit_btn",
-                'input[type="submit"]',
-                "text=发表",
-                "text=发布",
-                ".tb_btn_submit",
+                "button.poster_submit",
+                "button.j_submit",
+                ".btn_default.j_submit",
+                "button[title*='发表']",
+                "button:has-text('发表')",
             ]
 
             for selector in submit_selectors:
                 try:
                     submit_btn = await self.page.wait_for_selector(selector, timeout=5000)
                     if submit_btn:
-                        await submit_btn.scroll_into_view_if_needed()
-                        await asyncio.sleep(0.3)
-                        await submit_btn.click()
-                        logger.info(f"Clicked submit button: {selector}")
-                        return True
+                        is_visible = await submit_btn.is_visible()
+                        if is_visible:
+                            await submit_btn.scroll_into_view_if_needed()
+                            await asyncio.sleep(0.3)
+                            await submit_btn.click()
+                            logger.info(f"Clicked submit button: {selector}")
+                            return True
                 except Exception:
                     continue
 
@@ -518,10 +675,18 @@ class TiebaPlaywrightPublisher:
             if self.playwright:
                 await self.playwright.stop()
 
+            if self.chrome_process:
+                self.chrome_process.terminate()
+                try:
+                    self.chrome_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.chrome_process.kill()
+
             self.page = None
             self.context = None
             self.browser = None
             self.playwright = None
+            self.chrome_process = None
 
             logger.info("Browser closed")
 
