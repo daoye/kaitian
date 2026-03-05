@@ -98,7 +98,9 @@ class ServiceManager:
     def _get_mediacrawler_env(self) -> dict:
         """Get environment variables for MediaCrawler."""
         env = os.environ.copy()
-        # Add MediaCrawler specific environment variables if needed
+        # Increase HTTP timeout for slow network connections (especially in China)
+        # Default is 30s, increase to 300s (5 minutes) for large packages
+        env["UV_HTTP_TIMEOUT"] = "300"
         return env
 
     def check_dependencies(self, service: str) -> bool:
