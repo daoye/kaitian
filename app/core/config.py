@@ -8,7 +8,9 @@ from typing import Optional
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    # ====================
     # Application
+    # ====================
     app_name: str = "KaiTian"
     app_version: str = "0.1.0"
     debug: bool = False
@@ -19,117 +21,86 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
 
-    # Database (SQLite)
-    database_url: str = "sqlite:///./kaitian.db"
-    database_echo: bool = False
+    # ====================
+    # Playwright Browser Configuration (System-wide)
+    # ====================
+    # 是否使用无头模式（默认False，使用有界面模式更容易通过反爬检测）
+    playwright_headless: bool = False
 
-    # Crawl4AI Configuration (API-based)
-    crawl4ai_enabled: bool = True
-    crawl4ai_api_url: Optional[str] = None  # Defaults to http://localhost:8001
+    # 是否使用CDP模式（默认False，使用真实Chrome浏览器，反检测效果更好）
+    # 注意: CDP模式需要系统没有运行中的Chrome实例
+    playwright_cdp_mode: bool = True
+
+    # CDP端口（默认9222）
+    playwright_cdp_port: int = 9222
+
+    # Cookie 持久化目录
+    cookie_dir: str = "data/platform_sessions"
+
+    # 浏览器数据目录
+    browser_data_dir: str = "data/browser_data"
+
+    # 默认登录超时时间（秒）
+    login_timeout: int = 300
+
+    # 默认页面操作超时时间（毫秒）
+    playwright_timeout: int = 60000
+
+    # ====================
+    # Database
+    # ====================
+    database_url: str = "sqlite:///./kaitian.db"
+
+    # ====================
+    # Crawl4AI Configuration
+    # ====================
+    crawl4ai_api_url: Optional[str] = None
     crawl4ai_timeout: int = 30
 
-    # Search Configuration
-    search_keywords: str = "python,programming,automation"
-    subreddit_list: str = "python,learnprogramming,programming"
-    search_interval_minutes: int = 30
-    max_posts_per_search: int = 10
-
-    # Processing
-    relevance_threshold: float = 0.7
-    max_concurrent_requests: int = 5
-    request_timeout_seconds: int = 30
-
-    # LangChain & AI 配置
-    # LLM 提供商选择: "openai", "azure", "anthropic", "ollama"
+    # ====================
+    # AI / LLM Configuration
+    # ====================
+    # LLM 提供商: openai, azure, anthropic
     llm_provider: str = "openai"
 
-    # OpenAI 配置
+    # OpenAI
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-3.5-turbo"
     openai_temperature: float = 0.7
-    openai_max_tokens: int = 2000
 
-    # Azure OpenAI 配置
+    # Azure OpenAI
     azure_openai_key: Optional[str] = None
     azure_openai_endpoint: Optional[str] = None
     azure_deployment_name: Optional[str] = None
-    azure_openai_api_version: str = "2024-02-15-preview"
 
-    # Anthropic Claude 配置
+    # Anthropic
     anthropic_api_key: Optional[str] = None
     anthropic_model: str = "claude-3-sonnet-20240229"
 
-    # 内容生成配置
-    content_generation_max_tokens: int = 2000
-    content_generation_temperature: float = 0.7
-    content_generation_timeout: int = 30
-    content_generation_cache_enabled: bool = False
-
-    # Redis 配置（用于缓存）
-    redis_enabled: bool = False
-    redis_url: str = "redis://localhost:6379"
-    redis_cache_ttl: int = 86400  # 24小时
-
-    # API 限流配置
-    rate_limit_enabled: bool = False
-    rate_limit_requests_per_minute: int = 60
-
-    # LangChain 追踪配置
-    langchain_tracing_enabled: bool = False
-    langchain_api_key: Optional[str] = None
-
     # ====================
-    # Publisher 配置 - 社交媒体发布
+    # Social Media API Keys
     # ====================
-
-    # Reddit 配置
+    # Reddit
     reddit_client_id: Optional[str] = None
     reddit_client_secret: Optional[str] = None
-    reddit_user_agent: str = "KaiTian/0.1.0"
     reddit_username: Optional[str] = None
     reddit_password: Optional[str] = None
 
-    # Twitter/X 配置
+    # Twitter/X
     twitter_consumer_key: Optional[str] = None
     twitter_consumer_secret: Optional[str] = None
     twitter_access_token: Optional[str] = None
     twitter_access_token_secret: Optional[str] = None
 
-    # LinkedIn 配置
+    # LinkedIn
     linkedin_client_id: Optional[str] = None
     linkedin_client_secret: Optional[str] = None
     linkedin_access_token: Optional[str] = None
     linkedin_person_urn: Optional[str] = None
 
-    # ====================
-    # Xiaohongshu (小红书) 配置 - Playwright 浏览器自动化
-    # ====================
-
-    # 是否使用无头模式（建议首次登录时设为 False 以便手动扫码）
-    xiaohongshu_headless: bool = True
-
-    # Cookie 持久化路径
-    xiaohongshu_cookie_path: Optional[str] = None
-
-    # 浏览器操作间隔（毫秒），用于模拟人类行为
-    xiaohongshu_slow_mo: int = 100
-
-    # 登录超时时间（秒）
-    xiaohongshu_login_timeout: int = 120
-
     class Config:
         env_file = ".env"
         case_sensitive = False
-
-    @property
-    def keywords(self) -> list[str]:
-        """Parse search keywords from comma-separated string."""
-        return [k.strip() for k in self.search_keywords.split(",") if k.strip()]
-
-    @property
-    def subreddits(self) -> list[str]:
-        """Parse subreddit list from comma-separated string."""
-        return [s.strip() for s in self.subreddit_list.split(",") if s.strip()]
 
 
 @lru_cache()

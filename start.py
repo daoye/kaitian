@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 """
-KaiTian Startup Script - Manage KaiTian and MediaCrawler services
+KaiTian Startup Script - Manage KaiTian service
 
-This script manages services in a monorepo structure:
-- KaiTian API (port 8000) - Main API service
-- MediaCrawler (port 8080) - Social media crawler WebUI
-
-All services use uv for dependency management.
+KaiTian is a standalone service providing web scraping and AI capabilities.
+No external dependencies required - all crawling is done via Playwright.
 
 Usage:
-    python start.py                    # Start all services
+    python start.py                    # Start KaiTian service
     python start.py --help             # Show help
-    python start.py start              # Start all services
-    python start.py stop               # Stop all services
+    python start.py start              # Start service
+    python start.py stop               # Stop service
     python start.py status             # Show service status
-    python start.py --only kaitian     # Start only KaiTian
-    python start.py --install-deps     # Install all dependencies
 """
 
 import os
@@ -25,16 +20,15 @@ import argparse
 import time
 import signal
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 import json
 
 
 class ServiceManager:
-    """Manage startup of multiple services using uv for dependency management."""
+    """Manage KaiTian service using uv for dependency management."""
 
     def __init__(self, base_dir: str = "."):
         self.base_dir = Path(base_dir).resolve()
-        self.services = []
         self.processes = {}
         self.log_dir = self.base_dir / "logs"
         self.log_dir.mkdir(exist_ok=True)
@@ -47,7 +41,7 @@ class ServiceManager:
             "kaitian": {
                 "path": self.base_dir / ".",
                 "name": "KaiTian",
-                "description": "KaiTian API Service",
+                "description": "KaiTian API Service - Web Scraping & AI Capabilities",
                 "port": 8000,
                 "cmd": [
                     self._get_uv_path(),
@@ -62,24 +56,6 @@ class ServiceManager:
                 "env": self._get_kaitian_env(),
                 "startup_msg": "Application startup complete",
             },
-            "mediacrawler": {
-                "path": self.base_dir / "packages" / "MediaCrawler",
-                "name": "MediaCrawler",
-                "description": "MediaCrawler Service - 小红书、抖音、快手、B站、微博、贴吧、知乎爬虫",
-                "port": 8080,
-                "cmd": [
-                    self._get_uv_path(),
-                    "run",
-                    "uvicorn",
-                    "api.main:app",
-                    "--port",
-                    "8080",
-                    "--host",
-                    "0.0.0.0",
-                ],
-                "env": self._get_mediacrawler_env(),
-                "startup_msg": "Uvicorn running on",
-            },
         }
 
     def _get_kaitian_env(self) -> dict:
@@ -90,17 +66,8 @@ class ServiceManager:
                 "KAITIAN_DEBUG": "false",
                 "KAITIAN_LOG_LEVEL": "INFO",
                 "DATABASE_URL": "sqlite:///./kaitian.db",
-                "CRAWL4AI_API_URL": "http://localhost:8001",
             }
         )
-        return env
-
-    def _get_mediacrawler_env(self) -> dict:
-        """Get environment variables for MediaCrawler."""
-        env = os.environ.copy()
-        # Increase HTTP timeout for slow network connections (especially in China)
-        # Default is 30s, increase to 300s (5 minutes) for large packages
-        env["UV_HTTP_TIMEOUT"] = "300"
         return env
 
     def check_dependencies(self, service: str) -> bool:
@@ -119,64 +86,6 @@ class ServiceManager:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
 
-    def clone_repository(self, service: str) -> bool:
-        """Clone repository if it doesn't exist - for submodule, use git submodule commands."""
-        config = self.services_config.get(service)
-        if not config:
-            return False
-
-        service_path = config["path"]
-        if service_path.exists():
-            print(f"✓ {config['name']} already exists at {service_path}")
-            return True
-
-        if service == "mediacrawler":
-            print(f"\n📥 Initializing MediaCrawler submodule...")
-            try:
-                subprocess.run(
-                    [
-                        "git",
-                        "submodule",
-                        "update",
-                        "--init",
-                        "--recursive",
-                        "packages/MediaCrawler",
-                    ],
-                    cwd=self.base_dir,
-                    check=True,
-                    capture_output=True,
-                )
-                print(f"✓ MediaCrawler submodule initialized")
-                self._setup_mediacrawler_config(service_path)
-                return True
-            except subprocess.CalledProcessError as e:
-                print(f"✗ Failed to initialize MediaCrawler submodule: {e}")
-                return False
-
-        return False
-
-    def _setup_mediacrawler_config(self, service_path: Path):
-        """Setup MediaCrawler configuration files."""
-        try:
-            # Copy .env.example to .env if it exists
-            env_example = service_path / ".env.example"
-            env_file = service_path / ".env"
-
-            if env_example.exists() and not env_file.exists():
-                import shutil
-
-                shutil.copy(env_example, env_file)
-                print(f"✓ MediaCrawler .env file created from example")
-
-            # Copy config/base_config.py example if needed
-            config_dir = service_path / "config"
-            if config_dir.exists():
-                print(f"✓ MediaCrawler config directory ready")
-                print(f"   Please edit {config_dir}/base_config.py to configure crawler settings")
-
-        except Exception as e:
-            print(f"⚠ Failed to setup MediaCrawler config: {e}")
-
     def install_dependencies(self, service: str) -> bool:
         """Install dependencies for a service."""
         config = self.services_config.get(service)
@@ -191,24 +100,15 @@ class ServiceManager:
         service_path = config["path"]
 
         try:
-            if service == "kaitian":
-                # Install KaiTian dependencies using uv
-                cmd = ["uv", "sync"]
-                subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
-                print(f"✓ {config['name']} dependencies installed")
-                return True
+            cmd = ["uv", "sync"]
+            subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
+            print(f"✓ {config['name']} dependencies installed")
 
-            elif service == "mediacrawler":
-                # Install MediaCrawler dependencies using uv
-                cmd = ["uv", "sync"]
-                subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
+            cmd = ["uv", "run", "playwright", "install"]
+            subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
+            print(f"✓ Playwright browsers installed")
 
-                # Install playwright browsers
-                cmd = ["uv", "run", "playwright", "install"]
-                subprocess.run(cmd, cwd=service_path, check=True, capture_output=True)
-
-                print(f"✓ {config['name']} dependencies installed")
-                return True
+            return True
 
         except subprocess.CalledProcessError as e:
             print(f"✗ Failed to install {config['name']} dependencies: {e}")
@@ -216,8 +116,6 @@ class ServiceManager:
         except FileNotFoundError as e:
             print(f"✗ Required tool not found for {config['name']}: {e}")
             return False
-
-        return False
 
     def start_service(self, service: str) -> bool:
         """Start a single service."""
@@ -276,12 +174,10 @@ class ServiceManager:
             return False
 
         config = self.services_config[service]
-        port = config["port"]
         startup_msg = config.get("startup_msg", "started")
 
         print(f"⏳ Waiting for {config['name']} to be ready...")
 
-        # Check log file for startup message
         log_file = self.processes[service]["log_file"]
         start_time = time.time()
 
@@ -300,38 +196,55 @@ class ServiceManager:
         print(f"⚠ {config['name']} startup message not detected (continuing anyway)")
         return True
 
-    def start_all_services(self, services: Optional[List[str]] = None) -> bool:
-        """Start all or specified services."""
-        if not services:
-            services = ["kaitian", "mediacrawler"]
+    def start_all_services(self) -> bool:
+        """Start KaiTian service."""
+        services = ["kaitian"]
+
+        # Check if already running
+        pid_file = self.log_dir / "services.pid"
+        if pid_file.exists():
+            try:
+                with open(pid_file, "r") as f:
+                    pids = json.load(f)
+
+                running_services = []
+                for service, pid in pids.items():
+                    try:
+                        os.kill(pid, 0)
+                        running_services.append((service, pid))
+                    except ProcessLookupError:
+                        pass
+
+                if running_services:
+                    print("=" * 60)
+                    print("⚠️  Services already running!")
+                    print("=" * 60)
+                    for service, pid in running_services:
+                        print(f"  {service}: PID {pid}")
+                    print("\nTo stop services, run: python start.py stop")
+                    print("To check status, run: python start.py status")
+                    return False
+            except Exception:
+                pass
 
         print("=" * 60)
         print("🎯 KaiTian Service Startup Manager")
         print("=" * 60)
 
-        # Check and clone repositories
-        for service in services:
-            if service != "kaitian":
-                self.clone_repository(service)
-
-        # Install dependencies
         print("\n" + "=" * 60)
         print("📦 Checking and installing dependencies...")
         print("=" * 60)
         for service in services:
             self.install_dependencies(service)
 
-        # Start services
         print("\n" + "=" * 60)
         print("🚀 Starting services...")
         print("=" * 60)
         for service in services:
             if not self.start_service(service):
                 return False
-            # Brief pause between service starts
             time.sleep(2)
 
-        # Wait for services to be ready
         print("\n" + "=" * 60)
         print("⏳ Waiting for services to be ready...")
         print("=" * 60)
@@ -368,10 +281,6 @@ class ServiceManager:
                 "docs": "http://localhost:8000/docs",
                 "health": "http://localhost:8000/api/v1/health",
             },
-            "mediacrawler": {
-                "webui": "http://localhost:8080",
-                "docs": "http://localhost:8080/docs",
-            },
         }
 
         for service, links in endpoints.items():
@@ -380,12 +289,11 @@ class ServiceManager:
                 for key, url in links.items():
                     print(f"  {key}: {url}")
 
-        if "mediacrawler" in self.processes:
-            print("\nMediaCrawler 使用说明:")
-            print("  - 访问 WebUI: http://localhost:8080")
-            print("  - 支持平台: 小红书、抖音、快手、B站、微博、贴吧、知乎")
-            print("  - 配置文件: ./MediaCrawler/config/base_config.py")
-            print("  - 使用命令: uv run main.py --platform xhs --lt qrcode --type search")
+        print("\nKaiTian 使用说明:")
+        print("  - API 文档: http://localhost:8000/docs")
+        print("  - 贴吧爬虫: POST /api/v1/crawler/tieba/search")
+        print("  - 帖子详情: POST /api/v1/crawler/tieba/post")
+        print("  - 健康检查: GET /api/v1/health")
 
     def cleanup(self):
         """Clean up resources."""
@@ -420,12 +328,10 @@ class ServiceManager:
             return
 
         if args.install_deps:
-            for service in ["kaitian", "mediacrawler"]:
-                self.install_dependencies(service)
+            self.install_dependencies("kaitian")
             return
 
-        services = args.only.split(",") if args.only else None
-        if not self.start_all_services(services):
+        if not self.start_all_services():
             print("\n✗ Failed to start services")
             sys.exit(1)
 
@@ -433,13 +339,13 @@ class ServiceManager:
         self.print_endpoints()
 
         print("\n" + "=" * 60)
-        print("✓ All services started successfully!")
+        print("✓ KaiTian started successfully!")
         print("=" * 60)
         print("\n💡 Tips:")
-        print("  - View logs: tail -f logs/{service}.log")
-        print("  - KaiTian API docs: http://localhost:8000/docs")
-        print("  - Stop services: python start.py stop")
-        print("  - Press Ctrl+C to stop all services\n")
+        print("  - View logs: tail -f logs/kaitian.log")
+        print("  - API docs: http://localhost:8000/docs")
+        print("  - Stop service: python start.py stop")
+        print("  - Press Ctrl+C to stop\n")
 
         try:
             while True:
@@ -488,6 +394,7 @@ class ServiceManager:
 
     def show_status(self):
         """Show status of all services."""
+        self._init_services_config()
         print("=" * 60)
         print("📊 Service Status")
         print("=" * 60)
@@ -511,12 +418,6 @@ class ServiceManager:
             print("  No running services found")
 
         print()
-        for service, config in self.services_config.items():
-            service_path = config["path"]
-            if service_path.exists():
-                print(f"  {service}: installed at {service_path}")
-            else:
-                print(f"  {service}: not installed")
 
 
 def main():
@@ -526,16 +427,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python start.py                    # Start all services
-    python start.py start              # Start all services
-    python start.py stop               # Stop all services
+    python start.py                    # Start KaiTian service
+    python start.py start              # Start service
+    python start.py stop               # Stop service
     python start.py status             # Show service status
-    python start.py --only kaitian     # Start only KaiTian
     python start.py --install-deps     # Install dependencies
-
-Monorepo Structure:
-    kaitian/                # Main API service
-    packages/MediaCrawler/  # Social media crawler (submodule)
         """,
     )
 
@@ -545,11 +441,6 @@ Monorepo Structure:
         choices=["start", "stop", "status"],
         default="start",
         help="Command to execute: start (default), stop, or status",
-    )
-    parser.add_argument(
-        "--only",
-        help="Comma-separated list of services to start (kaitian, mediacrawler)",
-        type=str,
     )
     parser.add_argument(
         "--install-deps",

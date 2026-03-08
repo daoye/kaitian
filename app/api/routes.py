@@ -553,3 +553,116 @@ async def publish_comment(
     except Exception as e:
         logger.error(f"Publish comment failed: {str(e)}")
         return {"success": False, "error": str(e)}
+
+
+# ============================================================================
+# Tieba Crawler Endpoints - 贴吧爬虫
+# ============================================================================
+
+
+@router.post("/crawler/tieba/search")
+async def tieba_search(
+    keyword: str,
+    pages: int = 5,
+    delay: float = 1.5,
+):
+    """
+    搜索百度贴吧帖子。
+
+    使用 Playwright 浏览器自动化搜索贴吧内容。
+    需要先登录百度账号（首次使用会弹出登录窗口）。
+
+    Args:
+        keyword: 搜索关键词
+        pages: 搜索页数（最大5页，默认5页）
+        delay: 页面请求间隔秒数（防止被封，默认1.5秒）
+
+    Returns:
+        {
+            "success": bool,
+            "keyword": str,
+            "total_posts": int,
+            "total_pages": int,
+            "search_time": float,
+            "posts": [
+                {
+                    "post_id": str,
+                    "title": str,
+                    "author": str,
+                    "content": str,
+                    "forum_name": str,
+                    "url": str,
+                    "reply_count": int
+                },
+                ...
+            ],
+            "error": str (if failed)
+        }
+    """
+    try:
+        from app.services.tieba_crawler import get_tieba_crawler
+
+        crawler = get_tieba_crawler()
+        result = await crawler.search(keyword=keyword, pages=pages, delay=delay)
+        formatted = crawler.format_result(result)
+        return formatted
+    except Exception as e:
+        logger.error(f"Tieba search failed: {str(e)}")
+        return {"success": False, "error": str(e), "keyword": keyword}
+
+
+@router.post("/crawler/tieba/post")
+async def tieba_get_post(
+    post_url: str,
+    max_comments: int = 30,
+):
+    """
+    获取贴吧帖子详情和评论。
+
+    使用 Playwright 浏览器自动化获取帖子内容和第一页评论。
+
+    Args:
+        post_url: 帖子 URL 或帖子 ID
+        max_comments: 最大评论数（默认30条）
+
+    Returns:
+        {
+            "success": bool,
+            "post": {
+                "post_id": str,
+                "title": str,
+                "author": str,
+                "content": str,
+                "forum_name": str,
+                "url": str,
+                "reply_count": int,
+                "media_urls": [str, ...]
+            },
+            "comments": [
+                {
+                    "comment_id": str,
+                    "author": str,
+                    "content": str,
+                    "floor": int,
+                    "upvotes": int
+                },
+                ...
+            ],
+            "total_replies": int,
+            "error": str (if failed)
+        }
+    """
+    try:
+        from app.services.tieba_crawler import get_tieba_crawler
+
+        crawler = get_tieba_crawler()
+        detail = await crawler.get_post_detail(post_url=post_url, max_comments=max_comments)
+
+        if detail:
+            formatted = crawler.format_post_detail(detail)
+            return formatted
+        else:
+            return {"success": False, "error": "Post not found", "post_url": post_url}
+    except Exception as e:
+        logger.error(f"Tieba get post failed: {str(e)}")
+        return {"success": False, "error": str(e), "post_url": post_url}

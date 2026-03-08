@@ -303,3 +303,64 @@ class PublishCommentResponse(BaseModel):
     comment_url: Optional[str] = Field(default=None, description="评论URL")
     platform: Optional[str] = Field(default=None, description="平台")
     error: Optional[str] = Field(default=None, description="错误信息")
+
+
+# ============================================================================
+# Tieba Models - 贴吧爬虫
+# ============================================================================
+
+
+class TiebaSearchRequest(BaseModel):
+    """贴吧搜索请求"""
+
+    keyword: str = Field(..., description="搜索关键词")
+    pages: int = Field(default=5, description="搜索页数 (最大5页)")
+    delay: Optional[float] = Field(default=1.5, description="页面请求间隔(秒)")
+
+
+class TiebaPostResponse(BaseModel):
+    """贴吧帖子简要信息"""
+
+    post_id: str = Field(..., description="帖子ID")
+    title: str = Field(default="", description="标题")
+    author: str = Field(default="", description="作者")
+    author_id: Optional[str] = Field(default=None, description="作者ID")
+    content: str = Field(default="", description="内容摘要")
+    forum_name: str = Field(default="", description="贴吧名称")
+    url: str = Field(default="", description="帖子URL")
+    reply_count: int = Field(default=0, description="回复数")
+    created_at: Optional[str] = Field(default=None, description="发布时间")
+    media_urls: List[str] = Field(default_factory=list, description="图片URL列表")
+
+
+class TiebaCommentResponse(BaseModel):
+    """贴吧评论信息"""
+
+    comment_id: str = Field(..., description="评论ID")
+    author: str = Field(default="", description="评论者")
+    author_id: Optional[str] = Field(default=None, description="评论者ID")
+    content: str = Field(default="", description="评论内容")
+    floor: int = Field(default=0, description="楼层")
+    upvotes: int = Field(default=0, description="点赞数")
+
+
+class TiebaSearchResponse(BaseModel):
+    """贴吧搜索响应"""
+
+    success: bool = Field(..., description="是否成功")
+    keyword: Optional[str] = Field(default=None, description="搜索关键词")
+    total_posts: Optional[int] = Field(default=0, description="总帖子数")
+    total_pages: Optional[int] = Field(default=0, description="总页数")
+    search_time: Optional[float] = Field(default=None, description="搜索耗时(秒)")
+    posts: Optional[List[TiebaPostResponse]] = Field(default=None, description="帖子列表")
+    error: Optional[str] = Field(default=None, description="错误信息")
+
+
+class TiebaPostDetailResponse(BaseModel):
+    """贴吧帖子详情响应"""
+
+    success: bool = Field(..., description="是否成功")
+    post: Optional[TiebaPostResponse] = Field(default=None, description="帖子详情")
+    comments: Optional[List[TiebaCommentResponse]] = Field(default=None, description="评论列表")
+    total_replies: Optional[int] = Field(default=0, description="总回复数")
+    error: Optional[str] = Field(default=None, description="错误信息")

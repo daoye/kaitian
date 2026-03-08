@@ -38,7 +38,7 @@ class PublisherService:
                 self._reddit_client = praw.Reddit(
                     client_id=self.settings.reddit_client_id,
                     client_secret=self.settings.reddit_client_secret,
-                    user_agent=self.settings.reddit_user_agent,
+                    user_agent=f"{self.settings.app_name}/{self.settings.app_version}",
                     username=self.settings.reddit_username,
                     password=self.settings.reddit_password,
                 )
@@ -387,9 +387,7 @@ class PublisherService:
                 from app.services.xiaohongshu_publisher import XiaohongshuPlaywrightPublisher
 
                 self._xiaohongshu_publisher = XiaohongshuPlaywrightPublisher(
-                    headless=self.settings.xiaohongshu_headless,
-                    cookie_path=self.settings.xiaohongshu_cookie_path,
-                    slow_mo=self.settings.xiaohongshu_slow_mo,
+                    headless=self.settings.playwright_headless,
                 )
                 logger.info("Xiaohongshu publisher initialized")
             except Exception as e:
@@ -445,8 +443,7 @@ class PublisherService:
                 from app.services.tieba_publisher import TiebaPlaywrightPublisher
 
                 self._tieba_publisher = TiebaPlaywrightPublisher(
-                    headless=self.settings.xiaohongshu_headless,
-                    slow_mo=self.settings.xiaohongshu_slow_mo,
+                    headless=self.settings.playwright_headless,
                 )
                 logger.info("Tieba publisher initialized")
             except Exception as e:
