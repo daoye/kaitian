@@ -230,12 +230,47 @@ class TiebaCrawler:
         page_num: int,
     ) -> Optional[List[TiebaPost]]:
         """Fetch and parse a search result page with CAPTCHA detection."""
-        encoded_keyword = urllib.parse.quote(keyword, safe="")
         pn = page_num * 10
-        search_url = f"{self.TIEBA_SEARCH_URL}?qw={encoded_keyword}&pn={pn}&rn=10&un=&only_thread=1"
 
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=90000)
-        await asyncio.sleep(2)
+        # For first page, use page interaction for proper Chinese encoding
+        if page_num == 0:
+            # Navigate to Tieba search page
+            await page.goto("https://tieba.baidu.com/f/search/res", wait_until="domcontentloaded")
+            await asyncio.sleep(1)
+
+            # Find and fill the search input
+            search_input = await page.query_selector('input[name="qw"], #qw, .search-input')
+            if search_input:
+                await search_input.fill(keyword)
+                await asyncio.sleep(0.5)
+
+                # Find and click search button
+                search_btn = await page.query_selector(
+                    '.search-btn, button[type="submit"], .btn-search'
+                )
+                if search_btn:
+                    await search_btn.click()
+                else:
+                    await search_input.press("Enter")
+
+                await page.wait_for_load_state("domcontentloaded")
+                await asyncio.sleep(2)
+            else:
+                # Fallback to direct URL navigation
+                encoded_keyword = urllib.parse.quote(keyword, safe="")
+                search_url = (
+                    f"{self.TIEBA_SEARCH_URL}?qw={encoded_keyword}&pn={pn}&rn=10&un=&only_thread=1"
+                )
+                await page.goto(search_url, wait_until="domcontentloaded")
+                await asyncio.sleep(2)
+        else:
+            # Subsequent pages: use direct URL with proper encoding
+            encoded_keyword = urllib.parse.quote(keyword, safe="")
+            search_url = (
+                f"{self.TIEBA_SEARCH_URL}?qw={encoded_keyword}&pn={pn}&rn=10&un=&only_thread=1"
+            )
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=90000)
+            await asyncio.sleep(2)
 
         current_url = page.url
         if "passport.baidu.com" in current_url or "login" in current_url.lower():
