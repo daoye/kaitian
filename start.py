@@ -331,8 +331,6 @@ class ServiceManager:
 
         print("\nKaiTian 使用说明:")
         print("  - API 文档: http://localhost:8000/docs")
-        print("  - 贴吧爬虫: POST /api/v1/crawler/tieba/search")
-        print("  - 帖子详情: POST /api/v1/crawler/tieba/post")
         print("  - 健康检查: GET /api/v1/health")
 
         print("\nMediaCrawler:")
