@@ -1,6 +1,7 @@
 """社交媒体爬虫服务 - 使用本地部署的 crawl4ai 实时爬取社交媒体内容。"""
 
 import json
+import time
 import requests
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -211,13 +212,13 @@ class SocialMediaCrawlerService:
                 method="POST",
                 payload={
                     "platform": platform,
-                    "type": "search",
-                    "keyword": keyword,
-                    "config": {"max_results": max_results},
+                    "login_type": "qrcode",
+                    "crawler_type": "search",
+                    "keywords": keyword,
                 },
             )
 
-            if not start_response or not start_response.get("task_id"):
+            if not start_response or start_response.get("status") != "ok":
                 error_msg = start_response.get("error", "Failed to start MediaCrawler task")
                 logger.error(f"Failed to start MediaCrawler task: {error_msg}")
                 state_store.save_search_session(
@@ -234,14 +235,13 @@ class SocialMediaCrawlerService:
                     "search_id": search_session_id,
                 }
 
-            task_id = start_response["task_id"]
-            logger.info(f"MediaCrawler task started: {task_id}, polling for results...")
+            logger.info(f"MediaCrawler task started for {platform}, polling for completion...")
 
-            task_result = await self._wait_for_mediacrawler_task(task_id)
+            task_result = await self._wait_for_mediacrawler_task(platform)
 
             if not task_result or not task_result.get("success"):
                 error_msg = task_result.get("error", "Task failed or timed out")
-                logger.error(f"MediaCrawler task failed: {task_id}, error: {error_msg}")
+                logger.error(f"MediaCrawler task failed for {platform}, error: {error_msg}")
                 state_store.save_search_session(
                     session_id=search_session_id,
                     session_data={
@@ -257,7 +257,7 @@ class SocialMediaCrawlerService:
                 }
 
             posts = task_result.get("posts", [])
-            logger.info(f"MediaCrawler task completed: {task_id}, got {len(posts)} posts")
+            logger.info(f"MediaCrawler task completed for {platform}, got {len(posts)} posts")
 
             state_store.save_search_session(
                 session_id=search_session_id,
@@ -360,13 +360,13 @@ class SocialMediaCrawlerService:
 
     async def _wait_for_mediacrawler_task(
         self,
-        task_id: str,
-        max_wait_time: int = 60,
+        platform: str,
+        max_wait_time: int = 300,
     ) -> Optional[Dict[str, Any]]:
         """轮询等待 MediaCrawler 任务完成。
 
         Args:
-            task_id: 任务 ID
+            platform: 平台类型 (tieba, xhs, etc.)
             max_wait_time: 最大等待时间（秒）
 
         Returns:
@@ -380,7 +380,7 @@ class SocialMediaCrawlerService:
         while elapsed < max_wait_time:
             try:
                 status_response = await self._call_mediacrawler_api(
-                    endpoint=f"/api/data/tasks/{task_id}",
+                    endpoint="/api/crawler/status",
                     method="GET",
                 )
 
@@ -391,14 +391,15 @@ class SocialMediaCrawlerService:
 
                 status = status_response.get("status", "")
 
-                if status == "completed":
-                    return await self._get_mediacrawler_results(task_id)
-                elif status == "failed":
-                    error_msg = status_response.get("error", "Task failed")
-                    logger.error(f"MediaCrawler task {task_id} failed: {error_msg}")
+                if status == "idle":
+                    # Crawler has finished, get results from data files
+                    return await self._get_mediacrawler_results_from_files(platform)
+                elif status == "error":
+                    error_msg = status_response.get("error_message", "Task failed")
+                    logger.error(f"MediaCrawler task for {platform} failed: {error_msg}")
                     return {"success": False, "error": error_msg}
                 elif status == "running":
-                    logger.debug(f"MediaCrawler task {task_id} still running...")
+                    logger.debug(f"MediaCrawler task for {platform} still running...")
                 else:
                     logger.warning(f"Unknown task status: {status}")
 
@@ -406,11 +407,11 @@ class SocialMediaCrawlerService:
                 elapsed += poll_interval
 
             except Exception as e:
-                logger.error(f"Error polling MediaCrawler task {task_id}: {str(e)}")
+                logger.error(f"Error polling MediaCrawler task for {platform}: {str(e)}")
                 time.sleep(poll_interval)
                 elapsed += poll_interval
 
-        logger.warning(f"MediaCrawler task {task_id} timed out after {max_wait_time}s")
+        logger.warning(f"MediaCrawler task for {platform} timed out after {max_wait_time}s")
         return {"success": False, "error": f"Task timed out after {max_wait_time}s"}
 
     async def _get_mediacrawler_results(self, task_id: str) -> Dict[str, Any]:
@@ -445,6 +446,71 @@ class SocialMediaCrawlerService:
             logger.error(f"Error getting MediaCrawler results: {str(e)}")
             return {"success": False, "error": str(e)}
 
+    async def _get_mediacrawler_results_from_files(self, platform: str) -> Dict[str, Any]:
+        """从 MediaCrawler 数据文件中读取爬虫结果。
+
+        MediaCrawler 将数据保存到 data/{platform}/json/ 目录下的 JSON 文件中。
+        文件名格式: search_contents_YYYY-MM-DD.json
+
+        Args:
+            platform: 平台类型 (tieba, xhs, dy, bili, zhihu)
+
+        Returns:
+            解析后的帖子数据
+        """
+        import json
+        import os
+        from datetime import datetime
+        from glob import glob
+
+        try:
+            # MediaCrawler 数据目录
+            data_dir = f"packages/MediaCrawler/data/{platform}/json"
+
+            if not os.path.exists(data_dir):
+                logger.warning(f"MediaCrawler data directory not found: {data_dir}")
+                return {"success": True, "posts": [], "total": 0}
+
+            # 查找最新的搜索结果文件
+            # 文件名格式: search_contents_YYYY-MM-DD.json
+            search_pattern = f"{data_dir}/search_contents_*.json"
+            files = glob(search_pattern)
+
+            if not files:
+                logger.warning(f"No search result files found in {data_dir}")
+                return {"success": True, "posts": [], "total": 0}
+
+            # 按修改时间排序，获取最新的文件
+            files.sort(key=os.path.getmtime, reverse=True)
+            latest_file = files[0]
+
+            logger.info(f"Reading MediaCrawler results from: {latest_file}")
+
+            # 读取 JSON 文件
+            with open(latest_file, "r", encoding="utf-8") as f:
+                raw_results = json.load(f)
+
+            if not isinstance(raw_results, list):
+                raw_results = [raw_results]
+
+            # 解析并标准化结果
+            posts = self._parse_mediacrawler_results(raw_results)
+
+            logger.info(f"Parsed {len(posts)} posts from MediaCrawler data file")
+
+            return {
+                "success": True,
+                "posts": posts,
+                "total": len(posts),
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding MediaCrawler JSON file: {str(e)}")
+            return {"success": False, "error": f"Invalid JSON data: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error reading MediaCrawler results from files: {str(e)}")
+            return {"success": False, "error": str(e)}
+
     def _parse_mediacrawler_results(
         self, raw_results: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -460,21 +526,30 @@ class SocialMediaCrawlerService:
 
         for item in raw_results:
             post = {
-                "post_id": item.get("id") or item.get("post_id") or f"mc_{len(posts)}",
+                "post_id": item.get("note_id")
+                or item.get("id")
+                or item.get("post_id")
+                or f"mc_{len(posts)}",
                 "title": item.get("title", ""),
-                "author": item.get("author") or item.get("user") or item.get("username", "unknown"),
-                "content": item.get("content") or item.get("text") or item.get("description", ""),
-                "url": item.get("url") or item.get("link", ""),
+                "author": item.get("user_nickname")
+                or item.get("author")
+                or item.get("user")
+                or item.get("username", "unknown"),
+                "content": item.get("desc")
+                or item.get("content")
+                or item.get("text")
+                or item.get("description", ""),
+                "url": item.get("note_url") or item.get("url") or item.get("link", ""),
                 "platform": item.get("platform", ""),
-                "created_at": item.get("created_at")
-                or item.get("publish_time")
+                "created_at": item.get("publish_time")
+                or item.get("created_at")
                 or item.get("time"),
             }
 
-            if "forum_name" in item:
-                post["forum_name"] = item["forum_name"]
-            if "reply_count" in item:
-                post["reply_count"] = item["reply_count"]
+            if "tieba_name" in item:
+                post["forum_name"] = item["tieba_name"]
+            if "total_replay_num" in item:
+                post["reply_count"] = item["total_replay_num"]
             if "like_count" in item or "likes" in item:
                 post["like_count"] = item.get("like_count") or item.get("likes", 0)
             if "share_count" in item or "shares" in item:

@@ -1,9 +1,10 @@
 {
-  "active_plan": "/Users/js6j/demos/kaitian/.sisyphus/plans/tieba-search-fix.md",
-  "started_at": "2026-03-09T06:39:30.088Z",
+  "active_plan": "/home/april/projects/kaitian/.sisyphus/plans/tieba-search-fix.md",
+  "started_at": "2026-03-09T11:04:55.777Z",
   "session_ids": [
-    "ses_32ec9d298ffeUAkWPQOZQQWZBZ"
+    "ses_32dba8169ffeaMpuDtDF5oPXKI"
   ],
   "plan_name": "tieba-search-fix",
-  "agent": "atlas"
+  "agent": "atlas",
+  "worktree_path": "/home/april/projects/kaitian"
 }

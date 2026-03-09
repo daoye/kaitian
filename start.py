@@ -19,6 +19,7 @@ import subprocess
 import argparse
 import time
 import signal
+import socket
 from pathlib import Path
 from typing import Optional
 import json
@@ -71,7 +72,6 @@ class ServiceManager:
                     "8080",
                     "--host",
                     "0.0.0.0",
-                    "--reload",
                 ],
                 "env": os.environ.copy(),
                 "startup_msg": "Application startup complete",
@@ -152,6 +152,27 @@ class ServiceManager:
 
         log_file = self.log_dir / f"{service}.log"
 
+        if self._is_port_in_use(config["port"]):
+            if self.check_service_health(service):
+                print(
+                    f"⚠ {config['name']} already running on port {config['port']} "
+                    "(reusing existing process)"
+                )
+                self.processes[service] = {
+                    "process": None,
+                    "config": config,
+                    "log_file": log_file,
+                    "port": config["port"],
+                    "external": True,
+                }
+                return True
+
+            print(
+                f"✗ Port {config['port']} is already in use, but {config['name']} health check failed. "
+                "Please free the port or stop the conflicting process first."
+            )
+            return False
+
         print(f"🚀 Starting {config['name']} on port {config['port']}...")
         print(f"   Command: {' '.join(config['cmd'])}")
         print(f"   Working directory: {service_path}")
@@ -172,6 +193,7 @@ class ServiceManager:
                     "config": config,
                     "log_file": log_file,
                     "port": config["port"],
+                    "external": False,
                 }
                 print(f"✓ {config['name']} started (PID: {process.pid})")
 
@@ -185,9 +207,19 @@ class ServiceManager:
     def _save_pids(self):
         """Save PIDs of running services to file."""
         pid_file = self.log_dir / "services.pid"
-        pids = {service: info["process"].pid for service, info in self.processes.items()}
+        pids = {
+            service: info["process"].pid
+            for service, info in self.processes.items()
+            if info.get("process") is not None
+        }
         with open(pid_file, "w") as f:
             json.dump(pids, f)
+
+    @staticmethod
+    def _is_port_in_use(port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            return sock.connect_ex(("127.0.0.1", port)) == 0
 
     def wait_for_service(self, service: str, timeout: int = 30) -> bool:
         """Wait for service to be ready."""
@@ -297,10 +329,15 @@ class ServiceManager:
         for service, info in self.processes.items():
             process = info["process"]
             config = info["config"]
-            status = "✓ Running" if process.poll() is None else "✗ Stopped"
+            if process is None:
+                status = "✓ Running (external)"
+                pid = "external"
+            else:
+                status = "✓ Running" if process.poll() is None else "✗ Stopped"
+                pid = process.pid
             print(f"\n{config['name']}:")
             print(f"  Status: {status}")
-            print(f"  PID: {process.pid}")
+            print(f"  PID: {pid}")
             print(f"  Port: {info['port']}")
             print(f"  Log: {info['log_file']}")
 
@@ -346,6 +383,10 @@ class ServiceManager:
         for service, info in list(self.processes.items()):
             process = info["process"]
             config = info["config"]
+
+            if process is None:
+                print(f"Skipping external {config['name']} (managed by another process)")
+                continue
 
             if process.poll() is None:
                 print(f"Stopping {config['name']} (PID: {process.pid})...")
@@ -397,6 +438,8 @@ class ServiceManager:
                 time.sleep(1)
                 for service, info in list(self.processes.items()):
                     process = info["process"]
+                    if process is None:
+                        continue
                     if process.poll() is not None:
                         print(f"\n⚠ {service} process died (exit code: {process.returncode})")
 
