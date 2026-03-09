@@ -55,6 +55,27 @@ class ServiceManager:
                 ],
                 "env": self._get_kaitian_env(),
                 "startup_msg": "Application startup complete",
+                "health_endpoint": "/api/v1/health",
+            },
+            "mediacrawler": {
+                "path": self.base_dir / "packages" / "MediaCrawler",
+                "name": "MediaCrawler",
+                "description": "MediaCrawler WebUI API - Social Media Crawler",
+                "port": 8080,
+                "cmd": [
+                    self._get_uv_path(),
+                    "run",
+                    "uvicorn",
+                    "api.main:app",
+                    "--port",
+                    "8080",
+                    "--host",
+                    "0.0.0.0",
+                    "--reload",
+                ],
+                "env": os.environ.copy(),
+                "startup_msg": "Application startup complete",
+                "health_endpoint": "/api/health",
             },
         }
 
@@ -196,9 +217,21 @@ class ServiceManager:
         print(f"⚠ {config['name']} startup message not detected (continuing anyway)")
         return True
 
-    def start_all_services(self) -> bool:
-        """Start KaiTian service."""
-        services = ["kaitian"]
+    def start_all_services(self, only: Optional[str] = None) -> bool:
+        """Start services.
+
+        Args:
+            only: If specified, only start this service (kaitian or mediacrawler)
+        """
+        # Determine which services to start
+        if only:
+            if only not in self.services_config:
+                print(f"✗ Unknown service: {only}")
+                print(f"  Available services: {', '.join(self.services_config.keys())}")
+                return False
+            services = [only]
+        else:
+            services = list(self.services_config.keys())
 
         # Check if already running
         pid_file = self.log_dir / "services.pid"
@@ -209,11 +242,12 @@ class ServiceManager:
 
                 running_services = []
                 for service, pid in pids.items():
-                    try:
-                        os.kill(pid, 0)
-                        running_services.append((service, pid))
-                    except ProcessLookupError:
-                        pass
+                    if service in services:
+                        try:
+                            os.kill(pid, 0)
+                            running_services.append((service, pid))
+                        except ProcessLookupError:
+                            pass
 
                 if running_services:
                     print("=" * 60)
@@ -227,8 +261,9 @@ class ServiceManager:
             except Exception:
                 pass
 
+        service_names = ", ".join([self.services_config[s]["name"] for s in services])
         print("=" * 60)
-        print("🎯 KaiTian Service Startup Manager")
+        print(f"🎯 Service Startup Manager - {service_names}")
         print("=" * 60)
 
         print("\n" + "=" * 60)
@@ -281,6 +316,11 @@ class ServiceManager:
                 "docs": "http://localhost:8000/docs",
                 "health": "http://localhost:8000/api/v1/health",
             },
+            "mediacrawler": {
+                "api": "http://localhost:8080",
+                "docs": "http://localhost:8080/docs",
+                "health": "http://localhost:8080/api/health",
+            },
         }
 
         for service, links in endpoints.items():
@@ -294,6 +334,10 @@ class ServiceManager:
         print("  - 贴吧爬虫: POST /api/v1/crawler/tieba/search")
         print("  - 帖子详情: POST /api/v1/crawler/tieba/post")
         print("  - 健康检查: GET /api/v1/health")
+
+        print("\nMediaCrawler:")
+        print("  - WebUI: http://localhost:8080")
+        print("  - API: http://localhost:8080/docs")
 
     def cleanup(self):
         """Clean up resources."""
@@ -331,19 +375,22 @@ class ServiceManager:
             self.install_dependencies("kaitian")
             return
 
-        if not self.start_all_services():
+        only_service = getattr(args, "only", None)
+        if not self.start_all_services(only=only_service):
             print("\n✗ Failed to start services")
             sys.exit(1)
 
         self.print_status()
         self.print_endpoints()
 
+        started = only_service if only_service else "all services"
         print("\n" + "=" * 60)
-        print("✓ KaiTian started successfully!")
+        print(f"✓ {started} started successfully!")
         print("=" * 60)
         print("\n💡 Tips:")
-        print("  - View logs: tail -f logs/kaitian.log")
-        print("  - API docs: http://localhost:8000/docs")
+        print("  - View logs: tail -f logs/<service>.log")
+        print("  - API docs: http://localhost:8000/docs (KaiTian)")
+        print("  - MediaCrawler: http://localhost:8080")
         print("  - Stop service: python start.py stop")
         print("  - Press Ctrl+C to stop\n")
 
@@ -361,7 +408,7 @@ class ServiceManager:
             sys.exit(0)
 
     def stop_services(self):
-        """Stop all running services."""
+        """Stop all running services with proper cleanup."""
         print("=" * 60)
         print("🛑 Stopping services...")
         print("=" * 60)
@@ -377,45 +424,105 @@ class ServiceManager:
 
             for service, pid in pids.items():
                 try:
-                    import signal as sig
+                    os.kill(pid, 0)
+                    print(f"Stopping {service} (PID: {pid})...")
+                    os.kill(pid, signal.SIGTERM)
 
-                    os.kill(pid, sig.SIGTERM)
-                    print(f"✓ Stopped {service} (PID: {pid})")
+                    try:
+                        for _ in range(10):
+                            time.sleep(0.5)
+                            os.kill(pid, 0)
+                    except ProcessLookupError:
+                        print(f"✓ {service} stopped gracefully")
+                        continue
+
+                    print(f"⚠ {service} did not stop gracefully, force killing...")
+                    os.kill(pid, signal.SIGKILL)
+                    print(f"✓ {service} force stopped")
+
                 except ProcessLookupError:
                     print(f"⚠ {service} (PID: {pid}) not running")
+                except PermissionError:
+                    print(f"✗ Permission denied to stop {service} (PID: {pid})")
                 except Exception as e:
                     print(f"✗ Failed to stop {service}: {e}")
 
-            pid_file.unlink()
+            if pid_file.exists():
+                pid_file.unlink()
             print("\n✓ All services stopped")
 
         except Exception as e:
             print(f"✗ Error stopping services: {e}")
 
+    def check_service_health(self, service: str) -> bool:
+        """Check if service is responding to health requests."""
+        config = self.services_config.get(service)
+        if not config:
+            return False
+
+        try:
+            import requests
+
+            url = f"http://localhost:{config['port']}{config.get('health_endpoint', '/health')}"
+            response = requests.get(url, timeout=2)
+            return response.status_code == 200
+        except ImportError:
+            return False
+        except Exception:
+            return False
+
     def show_status(self):
-        """Show status of all services."""
+        """Show status of all services with health checks."""
         self._init_services_config()
         print("=" * 60)
         print("📊 Service Status")
         print("=" * 60)
 
         pid_file = self.log_dir / "services.pid"
-        if pid_file.exists():
+        if not pid_file.exists() or pid_file.stat().st_size == 0:
+            print("  No running services found\n")
+            print("Available services:")
+            for name, config in self.services_config.items():
+                print(f"  - {name}: port {config['port']}")
+            return
+
+        try:
             with open(pid_file, "r") as f:
                 pids = json.load(f)
 
-            for service, pid in pids.items():
-                try:
-                    import signal as sig
+            if not pids:
+                print("  No running services found")
+                return
 
+            for service, pid in pids.items():
+                config = self.services_config.get(service, {})
+                port = config.get("port", "?")
+
+                try:
                     os.kill(pid, 0)
-                    print(f"  {service}: ✓ Running (PID: {pid})")
+                    is_healthy = self.check_service_health(service)
+                    health_str = "✓ Healthy" if is_healthy else "⚠ Starting"
+                    print(f"  {service}:")
+                    print(f"    Status: ✓ Running")
+                    print(f"    PID: {pid}")
+                    print(f"    Port: {port}")
+                    print(f"    Health: {health_str}")
                 except ProcessLookupError:
-                    print(f"  {service}: ✗ Stopped (PID: {pid} not found)")
+                    print(f"  {service}:")
+                    print(f"    Status: ✗ Stopped (PID: {pid} not found)")
+                    print(f"    Port: {port}")
+                except PermissionError:
+                    print(f"  {service}:")
+                    print(f"    Status: ⚠ No permission (PID: {pid})")
+                    print(f"    Port: {port}")
                 except Exception as e:
-                    print(f"  {service}: ? Unknown ({e})")
-        else:
-            print("  No running services found")
+                    print(f"  {service}:")
+                    print(f"    Status: ? Unknown ({e})")
+                    print(f"    Port: {port}")
+        except json.JSONDecodeError:
+            print("  Error: PID file corrupted")
+        except Exception as e:
+            print(f"  Error reading status: {e}")
 
         print()
 
@@ -441,6 +548,11 @@ Examples:
         choices=["start", "stop", "status"],
         default="start",
         help="Command to execute: start (default), stop, or status",
+    )
+    parser.add_argument(
+        "--only",
+        choices=["kaitian", "mediacrawler"],
+        help="Start only specified service",
     )
     parser.add_argument(
         "--install-deps",

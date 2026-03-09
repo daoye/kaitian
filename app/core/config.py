@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     crawl4ai_timeout: int = 30
 
     # ====================
+    # MediaCrawler Configuration
+    # ====================
+    mediacrawler_api_url: str = "http://localhost:8080"
+    mediacrawler_timeout: int = 60
+    mediacrawler_max_retries: int = 3
+    mediacrawler_poll_interval: int = 2
+
+    # ====================
     # AI / LLM Configuration
     # ====================
     # LLM 提供商: openai, azure, anthropic

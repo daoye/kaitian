@@ -144,31 +144,43 @@ async def crawl_url(
 
 @router.post("/crawler/search")
 async def search_social_media(
-    keyword: str,
+    keyword: str = "",
     platforms: Optional[List[str]] = None,
     max_results: int = 10,
+    crawler_platform: Optional[str] = None,
 ):
-    """
-    搜索社交媒体内容。
+    """搜索社交媒体内容。
 
     纯粹的能力提供 - n8n 负责关键词管理和结果处理。
 
     Args:
         keyword: 搜索关键词
-        platforms: 目标平台列表 ["reddit", "twitter", "linkedin", "xhs", "dy", "bili", "zhihu"]
+        platform: 目标平台 (tieba, xhs, dy, bili, zhihu, douyin)
+        platforms: 目标平台列表 (用于 crawl4ai: reddit, twitter, linkedin)
         max_results: 最大结果数
 
     Returns:
         帖子列表，包含标题、内容、作者、URL、互动数据等
     """
+    from app.services.social_media_crawler import MEDIACRAWLER_PLATFORMS
+
     try:
         service = social_media_crawler_service
-        result = await service.crawl_with_crawl4ai(
-            keyword=keyword,
-            platforms=platforms,
-            max_results=max_results,
-        )
-        return result
+
+        if crawler_platform and crawler_platform.lower() in MEDIACRAWLER_PLATFORMS:
+            result = await service.crawl_with_mediacrawler(
+                keyword=keyword,
+                platform=crawler_platform.lower(),
+                max_results=max_results,
+            )
+            return result
+        else:
+            result = await service.crawl_with_crawl4ai(
+                keyword=keyword,
+                platforms=platforms or [],
+                max_results=max_results,
+            )
+            return result
     except Exception as e:
         logger.error(f"Social media search failed: {str(e)}")
         return {"success": False, "error": str(e)}
@@ -181,14 +193,13 @@ async def crawl_post_detail(
     extract_comments: bool = False,
     max_comments: int = 10,
 ):
-    """
-    爬取单个帖子的详细内容。
+    """爬取单个帖子的详细内容。
 
     n8n 在获取搜索结果后，调用此 API 获取每个帖子的完整内容。
 
     Args:
         url: 帖子 URL
-        platform: 平台类型 (reddit, twitter, linkedin, xhs, dy, bili, zhihu)
+        platform: 平台类型 (reddit, twitter, linkedin, xhs, dy, bili, zhihu, tieba)
         extract_comments: 是否提取评论（默认 False）
         max_comments: 最大评论数（默认 10）
 
@@ -213,13 +224,25 @@ async def crawl_post_detail(
         }
     """
     try:
+        from app.services.social_media_crawler import MEDIACRAWLER_PLATFORMS
+
         service = social_media_crawler_service
-        result = await service.crawl_post_detail(
-            url=url,
-            platform=platform,
-            extract_comments=extract_comments,
-            max_comments=max_comments,
-        )
+
+        if platform.lower() in MEDIACRAWLER_PLATFORMS:
+            result = await service.get_post_detail_from_mediacrawler(
+                post_url=url,
+                platform=platform.lower(),
+                extract_comments=extract_comments,
+                max_comments=max_comments,
+            )
+        else:
+            result = await service.crawl_post_detail(
+                url=url,
+                platform=platform,
+                extract_comments=extract_comments,
+                max_comments=max_comments,
+            )
+
         return result
     except Exception as e:
         logger.error(f"Crawl post detail failed: {str(e)}")
@@ -560,109 +583,109 @@ async def publish_comment(
 # ============================================================================
 
 
-@router.post("/crawler/tieba/search")
-async def tieba_search(
-    keyword: str,
-    pages: int = 5,
-    delay: float = 1.5,
-):
-    """
-    搜索百度贴吧帖子。
+# @router.post("/crawler/tieba/search")
+# async def tieba_search(
+#     keyword: str,
+#     pages: int = 5,
+#     delay: float = 1.5,
+# ):
+#     """
+#     搜索百度贴吧帖子。
 
-    使用 Playwright 浏览器自动化搜索贴吧内容。
-    需要先登录百度账号（首次使用会弹出登录窗口）。
+#     使用 Playwright 浏览器自动化搜索贴吧内容。
+#     需要先登录百度账号（首次使用会弹出登录窗口）。
 
-    Args:
-        keyword: 搜索关键词
-        pages: 搜索页数（最大5页，默认5页）
-        delay: 页面请求间隔秒数（防止被封，默认1.5秒）
+#     Args:
+#         keyword: 搜索关键词
+#         pages: 搜索页数（最大5页，默认5页）
+#         delay: 页面请求间隔秒数（防止被封，默认1.5秒）
 
-    Returns:
-        {
-            "success": bool,
-            "keyword": str,
-            "total_posts": int,
-            "total_pages": int,
-            "search_time": float,
-            "posts": [
-                {
-                    "post_id": str,
-                    "title": str,
-                    "author": str,
-                    "content": str,
-                    "forum_name": str,
-                    "url": str,
-                    "reply_count": int
-                },
-                ...
-            ],
-            "error": str (if failed)
-        }
-    """
-    try:
-        from app.services.tieba_crawler import get_tieba_crawler
+#     Returns:
+#         {
+#             "success": bool,
+#             "keyword": str,
+#             "total_posts": int,
+#             "total_pages": int,
+#             "search_time": float,
+#             "posts": [
+#                 {
+#                     "post_id": str,
+#                     "title": str,
+#                     "author": str,
+#                     "content": str,
+#                     "forum_name": str,
+#                     "url": str,
+#                     "reply_count": int
+#                 },
+#                 ...
+#             ],
+#             "error": str (if failed)
+#         }
+#     """
+#     try:
+#         from app.services.tieba_crawler import get_tieba_crawler
 
-        crawler = get_tieba_crawler()
-        result = await crawler.search(keyword=keyword, pages=pages, delay=delay)
-        formatted = crawler.format_result(result)
-        return formatted
-    except Exception as e:
-        logger.error(f"Tieba search failed: {str(e)}")
-        return {"success": False, "error": str(e), "keyword": keyword}
+#         crawler = get_tieba_crawler()
+#         result = await crawler.search(keyword=keyword, pages=pages, delay=delay)
+#         formatted = crawler.format_result(result)
+#         return formatted
+#     except Exception as e:
+#         logger.error(f"Tieba search failed: {str(e)}")
+#         return {"success": False, "error": str(e), "keyword": keyword}
 
 
-@router.post("/crawler/tieba/post")
-async def tieba_get_post(
-    post_url: str,
-    max_comments: int = 30,
-):
-    """
-    获取贴吧帖子详情和评论。
+# @router.post("/crawler/tieba/post")
+# async def tieba_get_post(
+#     post_url: str,
+#     max_comments: int = 30,
+# ):
+#     """
+#     获取贴吧帖子详情和评论。
 
-    使用 Playwright 浏览器自动化获取帖子内容和第一页评论。
+#     使用 Playwright 浏览器自动化获取帖子内容和第一页评论。
 
-    Args:
-        post_url: 帖子 URL 或帖子 ID
-        max_comments: 最大评论数（默认30条）
+#     Args:
+#         post_url: 帖子 URL 或帖子 ID
+#         max_comments: 最大评论数（默认30条）
 
-    Returns:
-        {
-            "success": bool,
-            "post": {
-                "post_id": str,
-                "title": str,
-                "author": str,
-                "content": str,
-                "forum_name": str,
-                "url": str,
-                "reply_count": int,
-                "media_urls": [str, ...]
-            },
-            "comments": [
-                {
-                    "comment_id": str,
-                    "author": str,
-                    "content": str,
-                    "floor": int,
-                    "upvotes": int
-                },
-                ...
-            ],
-            "total_replies": int,
-            "error": str (if failed)
-        }
-    """
-    try:
-        from app.services.tieba_crawler import get_tieba_crawler
+#     Returns:
+#         {
+#             "success": bool,
+#             "post": {
+#                 "post_id": str,
+#                 "title": str,
+#                 "author": str,
+#                 "content": str,
+#                 "forum_name": str,
+#                 "url": str,
+#                 "reply_count": int,
+#                 "media_urls": [str, ...]
+#             },
+#             "comments": [
+#                 {
+#                     "comment_id": str,
+#                     "author": str,
+#                     "content": str,
+#                     "floor": int,
+#                     "upvotes": int
+#                 },
+#                 ...
+#             ],
+#             "total_replies": int,
+#             "error": str (if failed)
+#         }
+#     """
+#     try:
+#         from app.services.tieba_crawler import get_tieba_crawler
 
-        crawler = get_tieba_crawler()
-        detail = await crawler.get_post_detail(post_url=post_url, max_comments=max_comments)
+#         crawler = get_tieba_crawler()
+#         detail = await crawler.get_post_detail(post_url=post_url, max_comments=max_comments)
 
-        if detail:
-            formatted = crawler.format_post_detail(detail)
-            return formatted
-        else:
-            return {"success": False, "error": "Post not found", "post_url": post_url}
-    except Exception as e:
-        logger.error(f"Tieba get post failed: {str(e)}")
-        return {"success": False, "error": str(e), "post_url": post_url}
+#         if detail:
+#             formatted = crawler.format_post_detail(detail)
+#             return formatted
+#         else:
+#             return {"success": False, "error": "Post not found", "post_url": post_url}
+#     except Exception as e:
+#         logger.error(f"Tieba get post failed: {str(e)}")
+#         return {"success": False, "error": str(e), "post_url": post_url}

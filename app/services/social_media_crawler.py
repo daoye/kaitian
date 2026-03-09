@@ -12,6 +12,9 @@ from app.services.state_store import state_store
 logger = get_logger(__name__)
 
 
+MEDIACRAWLER_PLATFORMS = ["tieba", "xhs", "dy", "bili", "zhihu", "zhihu", "douyin"]
+
+
 class SocialMediaCrawlerService:
     """社交媒体爬虫服务 - 使用本地部署的 crawl4ai API 实时爬取。"""
 
@@ -19,6 +22,10 @@ class SocialMediaCrawlerService:
         self.settings = get_settings()
         self.crawl4ai_url = self.settings.crawl4ai_api_url
         self.crawl4ai_timeout = self.settings.crawl4ai_timeout
+        self.mediacrawler_url = self.settings.mediacrawler_api_url
+        self.mediacrawler_timeout = self.settings.mediacrawler_timeout
+        self.mediacrawler_max_retries = self.settings.mediacrawler_max_retries
+        self.mediacrawler_poll_interval = self.settings.mediacrawler_poll_interval
 
     async def crawl_with_crawl4ai(
         self,
@@ -160,6 +167,329 @@ class SocialMediaCrawlerService:
                 "error": str(e),
                 "search_id": search_session_id,
             }
+
+    async def crawl_with_mediacrawler(
+        self,
+        keyword: str,
+        platform: str = "tieba",
+        max_results: int = 10,
+    ) -> Dict[str, Any]:
+        """使用 MediaCrawler API 进行异步爬取。
+
+        流程：
+        1. 调用 MediaCrawler /api/crawler/start 启动任务
+        2. 轮询任务状态直到完成
+        3. 获取爬虫结果
+        4. 返回结果给调用方
+
+        Args:
+            keyword: 搜索关键词
+            platform: 平台类型 (tieba, xhs, dy, bili, zhihu)
+            max_results: 最大结果数
+
+        Returns:
+            搜索结果字典
+        """
+        import time
+
+        search_session_id = f"mc_{platform}_{datetime.utcnow().timestamp()}"
+
+        try:
+            state_store.save_search_session(
+                session_id=search_session_id,
+                session_data={
+                    "keyword": keyword,
+                    "platform": platform,
+                    "status": "in_progress",
+                    "created_at": datetime.utcnow().isoformat(),
+                    "max_results": max_results,
+                },
+            )
+
+            start_response = await self._call_mediacrawler_api(
+                endpoint="/api/crawler/start",
+                method="POST",
+                payload={
+                    "platform": platform,
+                    "type": "search",
+                    "keyword": keyword,
+                    "config": {"max_results": max_results},
+                },
+            )
+
+            if not start_response or not start_response.get("task_id"):
+                error_msg = start_response.get("error", "Failed to start MediaCrawler task")
+                logger.error(f"Failed to start MediaCrawler task: {error_msg}")
+                state_store.save_search_session(
+                    session_id=search_session_id,
+                    session_data={
+                        "status": "failed",
+                        "error_message": error_msg,
+                        "completed_at": datetime.utcnow().isoformat(),
+                    },
+                )
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "search_id": search_session_id,
+                }
+
+            task_id = start_response["task_id"]
+            logger.info(f"MediaCrawler task started: {task_id}, polling for results...")
+
+            task_result = await self._wait_for_mediacrawler_task(task_id)
+
+            if not task_result or not task_result.get("success"):
+                error_msg = task_result.get("error", "Task failed or timed out")
+                logger.error(f"MediaCrawler task failed: {task_id}, error: {error_msg}")
+                state_store.save_search_session(
+                    session_id=search_session_id,
+                    session_data={
+                        "status": "failed",
+                        "error_message": error_msg,
+                        "completed_at": datetime.utcnow().isoformat(),
+                    },
+                )
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "search_id": search_session_id,
+                }
+
+            posts = task_result.get("posts", [])
+            logger.info(f"MediaCrawler task completed: {task_id}, got {len(posts)} posts")
+
+            state_store.save_search_session(
+                session_id=search_session_id,
+                session_data={
+                    "status": "completed",
+                    "total_results": len(posts),
+                    "completed_at": datetime.utcnow().isoformat(),
+                },
+            )
+
+            return {
+                "success": True,
+                "search_id": search_session_id,
+                "keyword": keyword,
+                "platform": platform,
+                "total_results": len(posts),
+                "posts": posts,
+            }
+
+        except Exception as e:
+            logger.error(f"MediaCrawler crawl failed for keyword '{keyword}': {str(e)}")
+            state_store.save_search_session(
+                session_id=search_session_id,
+                session_data={
+                    "status": "failed",
+                    "error_message": str(e),
+                    "completed_at": datetime.utcnow().isoformat(),
+                },
+            )
+            return {
+                "success": False,
+                "error": str(e),
+                "search_id": search_session_id,
+            }
+
+    async def _call_mediacrawler_api(
+        self,
+        endpoint: str,
+        method: str = "POST",
+        payload: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """调用 MediaCrawler API。
+
+        Args:
+            endpoint: API 端点路径
+            method: HTTP 方法
+            payload: 请求体 JSON 数据
+            params: URL 查询参数
+
+        Returns:
+            API 响应数据
+        """
+        import requests
+
+        url = f"{self.mediacrawler_url}{endpoint}"
+        max_attempts = self.mediacrawler_max_retries
+
+        for attempt in range(max_attempts):
+            try:
+                if method == "POST":
+                    response = requests.post(
+                        url,
+                        json=payload,
+                        timeout=self.mediacrawler_timeout,
+                    )
+                else:
+                    response = requests.get(
+                        url,
+                        params=params,
+                        timeout=self.mediacrawler_timeout,
+                    )
+
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 503:
+                    logger.warning(
+                        f"MediaCrawler service unavailable, attempt {attempt + 1}/{max_attempts}"
+                    )
+                    time.sleep(2)
+                else:
+                    logger.error(
+                        f"MediaCrawler API returned status {response.status_code}: {response.text}"
+                    )
+                    return {"error": f"HTTP {response.status_code}", "detail": response.text}
+
+            except requests.exceptions.ConnectionError:
+                logger.warning(
+                    f"Cannot connect to MediaCrawler, attempt {attempt + 1}/{max_attempts}"
+                )
+                time.sleep(2)
+            except requests.exceptions.Timeout:
+                logger.warning(f"MediaCrawler API timeout, attempt {attempt + 1}/{max_attempts}")
+                time.sleep(2)
+            except Exception as e:
+                logger.error(f"Error calling MediaCrawler API: {str(e)}")
+                return {"error": str(e)}
+
+        return {"error": "MediaCrawler service unavailable after retries"}
+
+    async def _wait_for_mediacrawler_task(
+        self,
+        task_id: str,
+        max_wait_time: int = 60,
+    ) -> Optional[Dict[str, Any]]:
+        """轮询等待 MediaCrawler 任务完成。
+
+        Args:
+            task_id: 任务 ID
+            max_wait_time: 最大等待时间（秒）
+
+        Returns:
+            任务结果数据
+        """
+        import time
+
+        elapsed = 0
+        poll_interval = self.mediacrawler_poll_interval
+
+        while elapsed < max_wait_time:
+            try:
+                status_response = await self._call_mediacrawler_api(
+                    endpoint=f"/api/data/tasks/{task_id}",
+                    method="GET",
+                )
+
+                if not status_response:
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+                    continue
+
+                status = status_response.get("status", "")
+
+                if status == "completed":
+                    return await self._get_mediacrawler_results(task_id)
+                elif status == "failed":
+                    error_msg = status_response.get("error", "Task failed")
+                    logger.error(f"MediaCrawler task {task_id} failed: {error_msg}")
+                    return {"success": False, "error": error_msg}
+                elif status == "running":
+                    logger.debug(f"MediaCrawler task {task_id} still running...")
+                else:
+                    logger.warning(f"Unknown task status: {status}")
+
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+
+            except Exception as e:
+                logger.error(f"Error polling MediaCrawler task {task_id}: {str(e)}")
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+
+        logger.warning(f"MediaCrawler task {task_id} timed out after {max_wait_time}s")
+        return {"success": False, "error": f"Task timed out after {max_wait_time}s"}
+
+    async def _get_mediacrawler_results(self, task_id: str) -> Dict[str, Any]:
+        """获取 MediaCrawler 爬虫结果。
+
+        Args:
+            task_id: 任务 ID
+
+        Returns:
+            解析后的帖子数据
+        """
+        try:
+            results_response = await self._call_mediacrawler_api(
+                endpoint="/api/data/results",
+                method="GET",
+                params={"task_id": task_id},
+            )
+
+            if not results_response:
+                return {"success": False, "error": "No results returned"}
+
+            raw_results = results_response.get("data", [])
+            posts = self._parse_mediacrawler_results(raw_results)
+
+            return {
+                "success": True,
+                "posts": posts,
+                "total": len(posts),
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting MediaCrawler results: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    def _parse_mediacrawler_results(
+        self, raw_results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """解析 MediaCrawler 返回的原始数据。
+
+        Args:
+            raw_results: MediaCrawler API 返回的原始结果
+
+        Returns:
+            标准化后的帖子列表
+        """
+        posts = []
+
+        for item in raw_results:
+            post = {
+                "post_id": item.get("id") or item.get("post_id") or f"mc_{len(posts)}",
+                "title": item.get("title", ""),
+                "author": item.get("author") or item.get("user") or item.get("username", "unknown"),
+                "content": item.get("content") or item.get("text") or item.get("description", ""),
+                "url": item.get("url") or item.get("link", ""),
+                "platform": item.get("platform", ""),
+                "created_at": item.get("created_at")
+                or item.get("publish_time")
+                or item.get("time"),
+            }
+
+            if "forum_name" in item:
+                post["forum_name"] = item["forum_name"]
+            if "reply_count" in item:
+                post["reply_count"] = item["reply_count"]
+            if "like_count" in item or "likes" in item:
+                post["like_count"] = item.get("like_count") or item.get("likes", 0)
+            if "share_count" in item or "shares" in item:
+                post["share_count"] = item.get("share_count") or item.get("shares", 0)
+            if "comment_count" in item:
+                post["comment_count"] = item["comment_count"]
+
+            if item.get("media"):
+                post["media_urls"] = (
+                    item["media"] if isinstance(item["media"], list) else [item["media"]]
+                )
+
+            posts.append(post)
+
+        return posts
 
     def _call_crawl4ai_api(self, url: str) -> Optional[Dict[str, Any]]:
         """调用本地部署的 crawl4ai API。
@@ -318,6 +648,141 @@ class SocialMediaCrawlerService:
             posts.append(current_post)
 
         return posts
+
+    async def get_post_detail_from_mediacrawler(
+        self,
+        post_url: str,
+        platform: str = "tieba",
+        extract_comments: bool = False,
+        max_comments: int = 10,
+    ) -> Dict[str, Any]:
+        """使用 MediaCrawler API 获取帖子详情。
+
+        流程：
+        1. 调用 MediaCrawler /api/crawler/start 启动详情爬取任务
+        2. 轮询任务状态直到完成
+        3. 获取爬虫结果
+        4. 返回详情给调用方
+
+        Args:
+            post_url: 帖子 URL
+            platform: 平台类型 (tieba, xhs, dy, bili, zhihu)
+            extract_comments: 是否提取评论
+            max_comments: 最大评论数
+
+        Returns:
+            {
+                "success": bool,
+                "post": {
+                    "post_id": str,
+                    "title": str,
+                    "author": str,
+                    "content": str,
+                    "forum_name": str,
+                    "url": str,
+                    "reply_count": int,
+                    "media_urls": list
+                },
+                "comments": list,
+                "error": str (if failed)
+            }
+        """
+        import time
+
+        try:
+            logger.info(f"Getting post detail from MediaCrawler: {post_url} (platform: {platform})")
+
+            # 启动详情爬取任务
+            start_response = await self._call_mediacrawler_api(
+                endpoint="/api/crawler/start",
+                method="POST",
+                payload={
+                    "platform": platform,
+                    "type": "detail",
+                    "config": {
+                        "post_urls": [post_url],
+                        "max_comments": max_comments,
+                    },
+                },
+            )
+
+            if not start_response or not start_response.get("task_id"):
+                error_msg = start_response.get("error", "Failed to start MediaCrawler detail task")
+                logger.error(f"Failed to start MediaCrawler detail task: {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "url": post_url,
+                }
+
+            task_id = start_response["task_id"]
+            logger.info(f"MediaCrawler detail task started: {task_id}, polling for results...")
+
+            # 轮询等待任务完成
+            task_result = await self._wait_for_mediacrawler_task(task_id, max_wait_time=120)
+
+            if not task_result or not task_result.get("success"):
+                error_msg = task_result.get("error", "Detail task failed or timed out")
+                logger.error(f"MediaCrawler detail task failed: {task_id}, error: {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "url": post_url,
+                }
+
+            # 解析帖子详情
+            raw_posts = task_result.get("posts", [])
+            if not raw_posts:
+                return {
+                    "success": False,
+                    "error": "No post data returned",
+                    "url": post_url,
+                }
+
+            post_data = raw_posts[0] if raw_posts else {}
+            comments = []
+
+            # 提取评论（如果需要）
+            if extract_comments:
+                comments = post_data.get("comments", [])[:max_comments]
+
+            # 构建标准化响应
+            post_detail = {
+                "post_id": post_data.get("post_id") or post_data.get("id") or f"mc_{task_id}",
+                "title": post_data.get("title", ""),
+                "author": post_data.get("author") or post_data.get("user", "unknown"),
+                "content": post_data.get("content") or post_data.get("text", ""),
+                "forum_name": post_data.get("forum_name", ""),
+                "url": post_data.get("url") or post_url,
+                "reply_count": post_data.get("reply_count") or post_data.get("comment_count", 0),
+                "media_urls": post_data.get("media_urls", [])
+                if isinstance(post_data.get("media_urls"), list)
+                else [],
+            }
+
+            # 添加可选字段
+            if post_data.get("like_count"):
+                post_detail["like_count"] = post_data.get("like_count")
+            if post_data.get("created_at"):
+                post_detail["created_at"] = post_data.get("created_at")
+
+            logger.info(
+                f"MediaCrawler detail task completed: {task_id}, got post: {post_detail.get('title', '')[:50]}"
+            )
+
+            return {
+                "success": True,
+                "post": post_detail,
+                "comments": comments,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get post detail from MediaCrawler: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "url": post_url,
+            }
 
     async def crawl_post_detail(
         self,
