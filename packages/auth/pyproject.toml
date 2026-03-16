@@ -2,9 +2,11 @@
 name = "auth"
 version = "0.1.0"
 description = "认证与会话管理模块"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "core",
+    "browser",
 ]
 
 [build-system]

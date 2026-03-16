@@ -1,7 +1,29 @@
-"""browser 异常定义."""
+from core.exceptions import BrowserError as CoreBrowserError, SessionError, TimeoutError
 
-from core.exceptions import KaitianError
 
-class BrowserError(KaitianError):
-    """浏览器相关错误."""
+class BrowserError(CoreBrowserError):
+    pass
+
+
+class BrowserLaunchError(BrowserError):
+    pass
+
+
+class BrowserContextError(BrowserError):
+    pass
+
+
+class BrowserPageError(BrowserError):
+    pass
+
+
+class BrowserCookieError(BrowserError):
+    pass
+
+
+class BrowserSessionError(SessionError):
+    pass
+
+
+class BrowserTimeoutError(TimeoutError):
     pass

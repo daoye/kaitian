@@ -17,6 +17,7 @@
 - 避免过度设计和复杂分层
 - 优先可运行、可维护，而非"理论上完美"
 - 每个决策都以"是否增加了不必要的复杂度"为检验标准
+- **避免使用依赖注入等复杂设计模式**，优先直接导入和显式依赖关系
 
 ### 1.2 原子化设计
 - 每个模块只做一件事，做好一件事
@@ -199,6 +200,7 @@ session = await auth.get_session("youtube", account_id="main")
 - 与 stealth 模块集成，自动注入反检测脚本
 - 统一的请求/响应拦截
 - 与 auth 集成，自动携带会话（支持多站点独立会话）
+- 页面出现验证码时，调用 captcha 模块完成识别与处理
 
 ```python
 # 使用示例
@@ -247,7 +249,7 @@ async with Browser(stealth=config) as browser:
 **设计要点**：
 - 支持多种验证码类型：滑块、点选、旋转、 reCAPTCHA、GeeTest 等
 - 插件化识别后端（本地模型、第三方打码平台）
-- 与 browser 集成，自动检测和处理页面中的验证码
+- 作为验证码处理能力模块，由 browser 在检测到验证码时调用
 - 失败重试和人工介入兜底
 
 ```python
@@ -263,13 +265,6 @@ solver = CaptchaSolver(
 # 独立识别
 result = await solver.solve_image("./captcha.png", type="text")
 
-# 与 browser 集成自动处理
-from browser import Browser
-async with Browser(captcha_solver=solver) as browser:
-    page = await browser.new_page()
-    await page.goto("https://example.com/login")
-    # 自动检测并解决页面中的验证码
-    await browser.handle_captcha_if_present()
 ```
 
 ### 3.6 discovery（资源发现与监控）
@@ -598,10 +593,10 @@ publisher = { workspace = true }
 
 ```
 core                ← 无依赖（被所有人依赖）
-auth                ← core
+auth                ← core, browser
 stealth             ← core
-browser             ← core, auth, stealth
-captcha             ← core, browser
+browser             ← core, stealth, captcha
+captcha             ← core
 discovery           ← core, browser, auth
 downloader          ← core, browser, discovery
 validator           ← core
@@ -612,9 +607,10 @@ publisher           ← core, auth, browser
 - 禁止循环依赖
 - 上层模块可依赖下层，同层模块尽量不互相依赖
 - `browser` 依赖 `stealth` 实现反检测功能
+- `browser` 依赖 `captcha` 处理页面验证码
 - `discovery` 依赖 `browser` 进行网页浏览和资源发现
 - `downloader` 依赖 `browser` 处理需要浏览器渲染的资源，可选依赖 `discovery` 获取资源列表
-- `captcha` 依赖 `browser` 进行页面验证码检测
+- `captcha` 仅提供验证码识别与求解能力，不依赖 `browser`
 
 **会话管理原则**：
 - `auth` 管理所有站点会话，支持多账号隔离

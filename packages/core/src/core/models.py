@@ -376,7 +376,7 @@ class Publisher(ABC):
         pass
 
 
-class BrowserContext(AsyncContextManager):
+class BrowserContext(ABC):
     """浏览器上下文协议
 
     定义了浏览器上下文必须实现的接口
@@ -405,7 +405,7 @@ class BrowserContext(AsyncContextManager):
         pass
 
     @abstractmethod
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """异步退出上下文"""
         pass
 

@@ -2,11 +2,12 @@
 name = "browser"
 version = "0.1.0"
 description = "Playwright 浏览器封装模块"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "core",
-    "auth",
-    "stealth",
+    "captcha",
+    "playwright>=1.48.0",
 ]
 
 [build-system]
