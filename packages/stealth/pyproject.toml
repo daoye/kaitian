@@ -1,0 +1,15 @@
+[project]
+name = "stealth"
+version = "0.1.0"
+description = "反检测/反反爬虫模块"
+requires-python = ">=3.12"
+dependencies = [
+    "core",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stealth"]

@@ -1,0 +1,17 @@
+[project]
+name = "browser"
+version = "0.1.0"
+description = "Playwright 浏览器封装模块"
+requires-python = ">=3.12"
+dependencies = [
+    "core",
+    "auth",
+    "stealth",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/browser"]

@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "core"
+version = "0.1.0"
+description = "KaiTian 核心包 - 提供基础抽象和数据结构"
+authors = [
+    {name = "KaiTian Team", email = "team@kaitian.dev"},
+]
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "toml>=0.10.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/kaitian-dev/kaitian"
+Repository = "https://github.com/kaitian-dev/kaitian.git"
+Documentation = "https://kaitian.dev/docs"
+Issues = "https://github.com/kaitian-dev/kaitian/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/core"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/core", "tests"]
+
+[tool.hatch.envs.hatch-test]
+dependencies = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.hatch.envs.hatch-test.scripts]
+run = "pytest {args}"
+run-cov = "pytest --cov=core {args}"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src/core"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == \"__main__\":",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]

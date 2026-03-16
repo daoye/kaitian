@@ -1,0 +1,23 @@
+[project]
+name = "api"
+version = "0.1.0"
+description = "KaiTian FastAPI 服务"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "core",
+    "auth",
+    "browser",
+    "downloader",
+    "validator",
+    "publisher",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/api"]
