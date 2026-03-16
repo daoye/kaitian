@@ -68,6 +68,7 @@ uv run uvicorn api.main:app --reload
 ## 文档
 
 - [项目结构设计](docs/architecture/project-structure.md)
+- [反检测能力设计说明书](docs/architecture/anti-detection-design.md)
 
 ## License
 
