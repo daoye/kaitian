@@ -1,44 +1,180 @@
-"""知末网 (znzmo.com) 认证适配器."""
+"""知末网 (znzmo.com) 认证适配器 - 生产级实现.
 
+特性:
+- 完整的生命周期管理 (page/context/browser 可靠关闭)
+- Session 契约对齐 (metadata.cookie_domain)
+- 正确的异常映射 (不吞异常)
+- 可配置的页面选择器
+- 验证码处理框架
+- Stealth 集成支持
+"""
+
+import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
-from core.models import Authenticator, Session
-from auth.exceptions import LoginFailedError, CaptchaRequiredError
-from auth.types import Credentials, CaptchaOutcome, VerifyResult
 from browser import BrowserManager, BrowserLaunchOptions
+from browser.exceptions import BrowserError, BrowserLaunchError
+from core.models import Authenticator, Session
+
+from auth.exceptions import (
+    AuthError,
+    CaptchaRequiredError,
+    InvalidCredentialsError,
+    LoginFailedError,
+    SessionExpiredError,
+)
+from auth.types import CaptchaOutcome
+
+logger = logging.getLogger("auth.znzmo")
 
 
 class ZnzmoAuthenticator(Authenticator):
-    """知末网认证适配器."""
+    """知末网认证适配器 - 生产级实现.
+
+    示例:
+        # 基础用法
+        async with ZnzmoAuthenticator() as auth:
+            session = await auth.login({
+                "username": "your_username",
+                "password": "your_password"
+            })
+
+        # 带验证码求解器
+        async with ZnzmoAuthenticator(captcha_solver=my_solver) as auth:
+            try:
+                session = await auth.login(credentials)
+            except CaptchaRequiredError as e:
+                # 处理需要手动验证码的情况
+                pass
+
+        # 带自定义选择器和 stealth
+        async with ZnzmoAuthenticator(
+            selectors={"username_input": "#custom-user"},
+            stealth_hook=stealth_manager.apply_to_context
+        ) as auth:
+            session = await auth.login(credentials)
+    """
 
     # 知末网相关配置
     BASE_URL = "https://www.znzmo.com"
     LOGIN_URL = "https://www.znzmo.com/login"
     USER_CENTER_URL = "https://www.znzmo.com/personalCenter"
 
-    # 页面选择器（需要根据实际页面调整）
-    SELECTORS = {
+    # 默认页面选择器
+    DEFAULT_SELECTORS = {
         "username_input": "input[name='username']",
         "password_input": "input[name='password']",
         "login_button": "button[type='submit']",
         "captcha_image": ".captcha-img",
+        "captcha_input": "input[name='captcha']",
         "error_message": ".error-message",
         "user_avatar": ".user-avatar",
         "user_name": ".user-name",
     }
 
-    def __init__(self, captcha_solver=None, timeout: int = 30000):
-        """初始化.
+    def __init__(
+        self,
+        captcha_solver: Optional[Any] = None,
+        timeout: int = 30000,
+        selectors: Optional[Dict[str, str]] = None,
+        stealth_hook: Optional[Callable] = None,
+    ):
+        """初始化认证适配器.
 
         Args:
-            captcha_solver: 验证码处理器
+            captcha_solver: 验证码求解器，需实现 solve(image_bytes, context) 方法
             timeout: 操作超时时间（毫秒）
+            selectors: 自定义页面选择器，会覆盖默认选择器
+            stealth_hook: 反检测钩子，传递给 BrowserManager
         """
-        self._browser_manager = BrowserManager()
         self._captcha_solver = captcha_solver
         self._timeout = timeout
+        self._selectors = {**self.DEFAULT_SELECTORS, **(selectors or {})}
+        self._stealth_hook = stealth_hook
+        self._browser_manager = BrowserManager(stealth_hook=stealth_hook)
+
+    def _get_selector(self, key: str) -> str:
+        """获取选择器."""
+        return self._selectors.get(key, self.DEFAULT_SELECTORS.get(key, ""))
+
+    async def _close_page_safely(self, page: Any) -> None:
+        """安全关闭页面，忽略已关闭错误."""
+        if page is None:
+            return
+        try:
+            await page.close()
+            logger.debug("auth.znzmo.page.closed")
+        except Exception as e:
+            # 忽略已关闭的错误
+            logger.debug("auth.znzmo.page.close_skipped", extra={"reason": str(e)})
+
+    async def _close_context_safely(self, context: Any) -> None:
+        """安全关闭上下文，忽略已关闭错误."""
+        if context is None:
+            return
+        try:
+            await context.close()
+            logger.debug("auth.znzmo.context.closed")
+        except Exception as e:
+            logger.debug("auth.znzmo.context.close_skipped", extra={"reason": str(e)})
+
+    def _validate_credentials(self, credentials: Dict[str, Any]) -> tuple[str, str]:
+        """验证并提取凭据.
+
+        Args:
+            credentials: 包含 username 和 password 的字典
+
+        Returns:
+            (username, password) 元组
+
+        Raises:
+            InvalidCredentialsError: 凭据缺失或无效
+        """
+        username = credentials.get("username")
+        password = credentials.get("password")
+
+        if not username or not password:
+            logger.warning("auth.znzmo.login.failed", extra={"reason": "missing_credentials"})
+            raise InvalidCredentialsError("Username and password are required")
+
+        if not isinstance(username, str) or not username.strip():
+            raise InvalidCredentialsError("Username must be a non-empty string")
+
+        if not isinstance(password, str) or not password.strip():
+            raise InvalidCredentialsError("Password must be a non-empty string")
+
+        return username.strip(), password
+
+    def _map_browser_exception(self, exc: Exception, context: str) -> AuthError:
+        """将 browser 异常映射为 auth 标准异常.
+
+        Args:
+            exc: 原始异常
+            context: 异常发生的上下文
+
+        Returns:
+            映射后的标准异常
+        """
+        if isinstance(exc, BrowserLaunchError):
+            return LoginFailedError(
+                f"Browser launch failed during {context}",
+                reason="browser_launch_failed",
+                details={"original_error": str(exc), "context": context},
+            )
+        elif isinstance(exc, BrowserError):
+            return LoginFailedError(
+                f"Browser operation failed during {context}",
+                reason="browser_operation_failed",
+                details={"original_error": str(exc), "context": context},
+            )
+        else:
+            return LoginFailedError(
+                f"Unexpected error during {context}",
+                reason="unexpected_error",
+                details={"original_error": str(exc), "context": context},
+            )
 
     async def login(self, credentials: Dict[str, Any]) -> Session:
         """执行知末网登录.
@@ -50,107 +186,291 @@ class ZnzmoAuthenticator(Authenticator):
             登录成功后的 Session 对象
 
         Raises:
-            LoginFailedError: 登录失败
+            InvalidCredentialsError: 凭据缺失或无效
             CaptchaRequiredError: 需要验证码
+            LoginFailedError: 登录失败（凭据错误、页面错误等）
         """
-        username = credentials.get("username")
-        password = credentials.get("password")
+        username, password = self._validate_credentials(credentials)
 
-        if not username or not password:
-            raise LoginFailedError(
-                "Username and password are required", reason="missing_credentials"
-            )
+        logger.info("auth.znzmo.login.begin", extra={"username": username})
 
-        # 使用浏览器进行登录
-        await self._browser_manager.start()
-        browser = self._browser_manager
+        context = None
+        page = None
+
         try:
-            page = await browser.new_page()
+            # 启动浏览器
+            try:
+                await self._browser_manager.start()
+            except Exception as exc:
+                mapped_exc = self._map_browser_exception(exc, "browser_start")
+                logger.error(
+                    "auth.znzmo.login.failed",
+                    extra={
+                        "reason": "browser_start_failed",
+                        "error": str(exc),
+                    },
+                )
+                raise mapped_exc from exc
+
+            # 创建上下文和页面
+            try:
+                from browser import BrowserContextOptions
+
+                context = await self._browser_manager.new_context(
+                    BrowserContextOptions(base_url=self.BASE_URL)
+                )
+                page = await context.new_page()
+            except Exception as exc:
+                mapped_exc = self._map_browser_exception(exc, "context_creation")
+                logger.error(
+                    "auth.znzmo.login.failed",
+                    extra={
+                        "reason": "context_creation_failed",
+                        "error": str(exc),
+                    },
+                )
+                raise mapped_exc from exc
 
             # 访问登录页面
-            await page.goto(self.LOGIN_URL, wait_until="networkidle")
+            try:
+                await page.goto(self.LOGIN_URL, wait_until="networkidle")
+            except Exception as exc:
+                raise LoginFailedError(
+                    "Failed to navigate to login page",
+                    reason="navigation_failed",
+                    details={"url": self.LOGIN_URL, "error": str(exc)},
+                ) from exc
 
-            # 填写用户名
-            await page.fill(self.SELECTORS["username_input"], username)
+            # 填写用户名和密码
+            try:
+                await page.fill(self._get_selector("username_input"), username)
+                await page.fill(self._get_selector("password_input"), password)
+            except Exception as exc:
+                raise LoginFailedError(
+                    "Failed to fill login form",
+                    reason="form_fill_failed",
+                    details={"error": str(exc)},
+                ) from exc
 
-            # 填写密码
-            await page.fill(self.SELECTORS["password_input"], password)
-
-            # 检查是否需要验证码
-            captcha_element = await page.query_selector(self.SELECTORS["captcha_image"])
-            if captcha_element:
-                if not self._captcha_solver:
-                    raise CaptchaRequiredError("CAPTCHA required but no solver configured")
-
-                # 处理验证码
-                outcome = await self._solve_captcha(page)
-                if outcome.status == "failed":
-                    raise LoginFailedError(
-                        "CAPTCHA solving failed", reason="captcha_failed", details=outcome.data
-                    )
+            # 检查并处理验证码
+            await self._handle_captcha_if_needed(page)
 
             # 点击登录按钮
-            await page.click(self.SELECTORS["login_button"])
+            try:
+                await page.click(self._get_selector("login_button"))
+            except Exception as exc:
+                raise LoginFailedError(
+                    "Failed to click login button",
+                    reason="click_failed",
+                    details={"error": str(exc)},
+                ) from exc
 
             # 等待登录结果
             try:
-                # 等待页面跳转或错误提示
                 await page.wait_for_load_state("networkidle", timeout=self._timeout)
             except Exception:
+                # 超时继续检查状态
                 pass
 
             # 检查登录错误
-            error_element = await page.query_selector(self.SELECTORS["error_message"])
+            error_element = await page.query_selector(self._get_selector("error_message"))
             if error_element:
                 error_text = await error_element.text_content()
+                logger.warning(
+                    "auth.znzmo.login.failed",
+                    extra={
+                        "reason": "invalid_credentials",
+                        "error_text": error_text,
+                    },
+                )
                 raise LoginFailedError(
                     f"Login failed: {error_text}",
                     reason="invalid_credentials",
                     details={"error_text": error_text},
                 )
 
-            # 检查是否登录成功（通过查找用户头像或用户名）
+            # 检查是否登录成功
             user_element = await page.query_selector(
-                f"{self.SELECTORS['user_avatar']}, {self.SELECTORS['user_name']}"
+                f"{self._get_selector('user_avatar')}, {self._get_selector('user_name')}"
             )
             if not user_element:
+                logger.warning(
+                    "auth.znzmo.login.failed",
+                    extra={
+                        "reason": "user_indicator_not_found",
+                    },
+                )
                 raise LoginFailedError(
-                    "Login may have failed - user indicator not found", reason="unknown"
+                    "Login may have failed - user indicator not found",
+                    reason="unknown",
                 )
 
             # 提取 cookies
-            cookies = await browser.get_cookies()
-            cookie_dict = {c["name"]: c["value"] for c in cookies}
+            try:
+                cookies = await context.cookies()
+                cookie_dict = {c["name"]: c["value"] for c in cookies}
+            except Exception as exc:
+                raise LoginFailedError(
+                    "Failed to extract cookies",
+                    reason="cookie_extraction_failed",
+                    details={"error": str(exc)},
+                ) from exc
 
-            # 创建会话
+            # 获取用户代理
+            try:
+                user_agent = await page.evaluate("navigator.userAgent")
+            except Exception:
+                user_agent = ""
+
+            # 创建会话 - 生产级 Session 契约
             session = Session(
                 session_id=str(uuid.uuid4()),
-                site="znzmo",
+                site="znzmo",  # 短键用于 repository 索引
                 account_id=username,
                 cookies=cookie_dict,
-                headers={"User-Agent": await page.evaluate("navigator.userAgent")},
-                expires_at=datetime.now() + timedelta(days=7),  # 默认7天过期
-                metadata={"login_time": datetime.now().isoformat(), "login_url": self.LOGIN_URL},
+                headers={"User-Agent": user_agent} if user_agent else {},
+                expires_at=datetime.now() + timedelta(days=7),
+                metadata={
+                    "login_time": datetime.now().isoformat(),
+                    "login_url": self.LOGIN_URL,
+                    "cookie_domain": ".znzmo.com",  # 关键：供 browser 模块使用
+                    "user_agent": user_agent,
+                    "account_id": username,
+                },
+            )
+
+            logger.info(
+                "auth.znzmo.login.success",
+                extra={
+                    "username": username,
+                    "session_id": session.session_id,
+                },
             )
 
             return session
 
+        except (InvalidCredentialsError, CaptchaRequiredError, LoginFailedError):
+            # 重新抛出已知的认证异常
+            raise
+        except Exception as exc:
+            # 捕获其他所有异常并映射
+            logger.exception("auth.znzmo.login.failed", extra={"reason": "unexpected_error"})
+            if isinstance(exc, AuthError):
+                raise
+            raise LoginFailedError(
+                f"Unexpected error during login: {exc}",
+                reason="unexpected_error",
+                details={"error": str(exc)},
+            ) from exc
         finally:
-            pass  # BrowserManager 会在最后统一关闭
+            # 关键：确保资源被关闭（从里到外）
+            await self._close_page_safely(page)
+            await self._close_context_safely(context)
 
-    async def _solve_captcha(self, page) -> CaptchaOutcome:
-        """解决验证码."""
+    async def _handle_captcha_if_needed(self, page: Any) -> None:
+        """检查并处理验证码.
+
+        Args:
+            page: Playwright 页面对象
+
+        Raises:
+            CaptchaRequiredError: 需要验证码但没有 solver 或 solver 返回 manual_required
+            LoginFailedError: 验证码处理失败
+        """
+        captcha_element = await page.query_selector(self._get_selector("captcha_image"))
+        if not captcha_element:
+            return
+
+        logger.info("auth.znzmo.captcha.detected")
+
+        if not self._captcha_solver:
+            logger.warning("auth.znzmo.captcha.no_solver")
+            raise CaptchaRequiredError(
+                "CAPTCHA required but no solver configured",
+                details={"type": "unknown", "message": "Please provide a captcha solver"},
+            )
+
+        # 使用求解器处理验证码
+        outcome = await self._solve_captcha(page)
+
+        if outcome.status == "not_present":
+            return
+        elif outcome.status == "manual_required":
+            logger.warning("auth.znzmo.captcha.manual_required")
+            raise CaptchaRequiredError(
+                "CAPTCHA requires manual intervention",
+                details=outcome.data or {},
+            )
+        elif outcome.status == "failed":
+            logger.error("auth.znzmo.captcha.failed", extra={"details": outcome.data})
+            raise LoginFailedError(
+                "CAPTCHA solving failed",
+                reason="captcha_failed",
+                details=outcome.data or {},
+            )
+        elif outcome.status == "solved":
+            # 填写验证码
+            captcha_code = outcome.data.get("code") if outcome.data else None
+            if captcha_code:
+                try:
+                    await page.fill(self._get_selector("captcha_input"), captcha_code)
+                    logger.info("auth.znzmo.captcha.filled")
+                except Exception as exc:
+                    raise LoginFailedError(
+                        "Failed to fill CAPTCHA code",
+                        reason="captcha_fill_failed",
+                        details={"error": str(exc)},
+                    ) from exc
+        else:
+            logger.warning("auth.znzmo.captcha.unknown_status", extra={"status": outcome.status})
+            raise CaptchaRequiredError(
+                f"Unknown CAPTCHA outcome status: {outcome.status}",
+                details={"status": outcome.status},
+            )
+
+    async def _solve_captcha(self, page: Any) -> CaptchaOutcome:
+        """解决验证码.
+
+        Args:
+            page: Playwright 页面对象
+
+        Returns:
+            CaptchaOutcome 结果
+        """
         if not self._captcha_solver:
             return CaptchaOutcome(status="manual_required")
 
-        # 截图验证码区域
-        captcha_element = await page.query_selector(self.SELECTORS["captcha_image"])
-        if not captcha_element:
-            return CaptchaOutcome(status="not_present")
+        try:
+            # 检查验证码元素是否存在
+            captcha_element = await page.query_selector(self._get_selector("captcha_image"))
+            if not captcha_element:
+                return CaptchaOutcome(status="not_present")
 
-        # 这里应该调用验证码求解器
-        # 暂时返回需要手动处理
-        return CaptchaOutcome(status="manual_required")
+            # 截图验证码区域
+            screenshot_bytes = await captcha_element.screenshot()
+
+            # 调用求解器
+            # 期望求解器接口: async solve(image_bytes: bytes, context: dict) -> CaptchaOutcome
+            if hasattr(self._captcha_solver, "solve"):
+                outcome = await self._captcha_solver.solve(
+                    screenshot_bytes, context={"site": "znzmo", "url": page.url}
+                )
+                return outcome
+            else:
+                # 如果 solver 是可调用对象
+                outcome = await self._captcha_solver(screenshot_bytes, {"site": "znzmo"})
+                if isinstance(outcome, CaptchaOutcome):
+                    return outcome
+                else:
+                    # 兼容字符串返回
+                    return CaptchaOutcome(status=outcome)
+
+        except Exception as exc:
+            logger.exception("auth.znzmo.captcha.solve_error")
+            return CaptchaOutcome(
+                status="failed",
+                data={"error": str(exc), "type": type(exc).__name__},
+            )
 
     async def logout(self, session: Session) -> bool:
         """执行登出.
@@ -160,50 +480,96 @@ class ZnzmoAuthenticator(Authenticator):
 
         Returns:
             是否成功登出
+
+        Raises:
+            LoginFailedError: 浏览器操作失败（非业务失败）
         """
-        await self._browser_manager.start()
-        browser = self._browser_manager
+        if not session.cookies:
+            logger.warning("auth.znzmo.logout.no_cookies")
+            return False
+
+        context = None
+        page = None
+
         try:
-            page = await browser.new_page()
+            await self._browser_manager.start()
+
+            # 创建新上下文并设置 cookies
+            from browser import BrowserContextOptions
+
+            context = await self._browser_manager.new_context(
+                BrowserContextOptions(
+                    base_url=self.BASE_URL,
+                    storage_state=None,  # 空状态，手动设置 cookies
+                )
+            )
 
             # 设置 cookies
-            await browser.set_cookies(
+            cookie_domain = session.metadata.get("cookie_domain", ".znzmo.com")
+            await context.add_cookies(
                 [
-                    {"name": k, "value": v, "domain": ".znzmo.com"}
+                    {"name": k, "value": v, "domain": cookie_domain, "path": "/"}
                     for k, v in session.cookies.items()
                 ]
             )
 
-            # 访问登出链接（需要确认实际URL）
+            page = await context.new_page()
+
+            # 访问登出链接
             await page.goto(f"{self.BASE_URL}/logout")
 
+            logger.info("auth.znzmo.logout.success", extra={"account_id": session.account_id})
             return True
-        except Exception:
-            return False
+
+        except Exception as exc:
+            # 生产级：不吞异常，但转换为标准异常
+            logger.exception("auth.znzmo.logout.failed")
+            raise LoginFailedError(
+                "Logout failed due to browser error",
+                reason="logout_failed",
+                details={"error": str(exc)},
+            ) from exc
         finally:
-            pass  # BrowserManager 会在最后统一关闭
+            await self._close_page_safely(page)
+            await self._close_context_safely(context)
 
     async def refresh(self, session: Session) -> Session:
         """刷新会话.
 
-        知末网不支持真正的刷新，这里只验证会话是否仍然有效。
-        如果无效，抛出异常要求重新登录。
+        知末网不支持真正的刷新，这里验证会话是否有效。
+        如果无效，抛出 SessionExpiredError。
 
         Args:
             session: 要刷新的会话
 
         Returns:
-            更新后的会话
+            更新过期时间的会话对象
 
         Raises:
-            LoginFailedError: 会话已失效需要重新登录
+            SessionExpiredError: 会话已失效
         """
+        if session.is_expired():
+            logger.warning("auth.znzmo.refresh.session_already_expired")
+            raise SessionExpiredError("Session has already expired")
+
         is_valid = await self.verify(session)
+
         if not is_valid:
-            raise LoginFailedError("Session expired, please re-login", reason="session_expired")
+            logger.warning("auth.znzmo.refresh.session_invalid")
+            raise SessionExpiredError("Session is no longer valid")
 
         # 更新过期时间
         session.expires_at = datetime.now() + timedelta(days=7)
+        session.update_usage()
+
+        logger.info(
+            "auth.znzmo.refresh.success",
+            extra={
+                "session_id": session.session_id,
+                "new_expires_at": session.expires_at.isoformat(),
+            },
+        )
+
         return session
 
     async def verify(self, session: Session) -> bool:
@@ -216,22 +582,43 @@ class ZnzmoAuthenticator(Authenticator):
 
         Returns:
             会话是否有效
+
+        Raises:
+            LoginFailedError: 浏览器操作失败（基础设施问题，非会话问题）
         """
         if session.is_expired():
             return False
 
-        await self._browser_manager.start()
-        browser = self._browser_manager
+        if not session.cookies:
+            return False
+
+        context = None
+        page = None
+
         try:
-            page = await browser.new_page()
+            await self._browser_manager.start()
+
+            # 创建新上下文并设置 cookies
+            from browser import BrowserContextOptions
+
+            cookie_domain = session.metadata.get("cookie_domain", ".znzmo.com")
+
+            context = await self._browser_manager.new_context(
+                BrowserContextOptions(
+                    base_url=self.BASE_URL,
+                    storage_state=None,
+                )
+            )
 
             # 设置 cookies
-            await browser.set_cookies(
+            await context.add_cookies(
                 [
-                    {"name": k, "value": v, "domain": ".znzmo.com"}
+                    {"name": k, "value": v, "domain": cookie_domain, "path": "/"}
                     for k, v in session.cookies.items()
                 ]
             )
+
+            page = await context.new_page()
 
             # 访问个人中心
             await page.goto(self.USER_CENTER_URL, wait_until="domcontentloaded")
@@ -239,26 +626,45 @@ class ZnzmoAuthenticator(Authenticator):
             # 检查是否被重定向到登录页
             current_url = page.url
             if "/login" in current_url:
+                logger.debug(
+                    "auth.znzmo.verify.session_invalid", extra={"reason": "redirected_to_login"}
+                )
                 return False
 
             # 检查是否存在用户标识
             user_element = await page.query_selector(
-                f"{self.SELECTORS['user_avatar']}, {self.SELECTORS['user_name']}"
+                f"{self._get_selector('user_avatar')}, {self._get_selector('user_name')}"
             )
 
-            return user_element is not None
+            is_valid = user_element is not None
+            logger.debug("auth.znzmo.verify.result", extra={"is_valid": is_valid})
+            return is_valid
 
-        except Exception:
-            return False
+        except Exception as exc:
+            # 基础设施失败应抛出异常，而不是返回 False
+            # False 只表示"会话无效"，不表示"无法验证"
+            logger.exception("auth.znzmo.verify.failed")
+            raise LoginFailedError(
+                "Failed to verify session due to browser error",
+                reason="verify_failed",
+                details={"error": str(exc)},
+            ) from exc
         finally:
-            pass  # BrowserManager 会在最后统一关闭
+            await self._close_page_safely(page)
+            await self._close_context_safely(context)
 
     async def close(self) -> None:
         """关闭浏览器管理器."""
-        await self._browser_manager.close()
+        try:
+            await self._browser_manager.close()
+            logger.debug("auth.znzmo.authenticator.closed")
+        except Exception as e:
+            logger.debug("auth.znzmo.authenticator.close_error", extra={"error": str(e)})
 
     async def __aenter__(self) -> "ZnzmoAuthenticator":
+        """异步进入上下文."""
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        """异步退出上下文，确保资源清理."""
         await self.close()
