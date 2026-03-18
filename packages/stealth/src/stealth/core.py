@@ -10,6 +10,7 @@ from .types import (
     NoiseLevel,
     PATCH_CATALOG,
     PRESET_PROFILES,
+    PatchContext,
     RiskLevel,
     StealthConfig,
     StealthPlan,
@@ -46,7 +47,11 @@ class StealthManager:
         self._site_policies = site_policies or []
         self._plan: StealthPlan | None = None
 
-    def build_plan(self, url: str | None = None) -> StealthPlan:
+    def build_plan(
+        self,
+        url: str | None = None,
+        context: PatchContext = "main",
+    ) -> StealthPlan:
         """构建反检测执行计划.
 
         根据配置生成完整的执行计划，包括指纹配置、初始化脚本、启动参数等。
@@ -54,6 +59,7 @@ class StealthManager:
 
         Args:
             url: 目标 URL，用于匹配站点策略，如果为 None 则使用默认配置
+            context: 目标执行上下文，默认为 main
 
         Returns:
             StealthPlan: 反检测执行计划
@@ -79,7 +85,13 @@ class StealthManager:
             enabled_patches = self._config.enabled_patches
             risk_limit = "medium"
 
-        init_scripts = self._generate_init_scripts(profile, enabled_patches, risk_limit)
+        effective_patches = resolve_enabled_patches(
+            enabled_patches=enabled_patches,
+            risk_limit=risk_limit,
+            context=context,
+        )
+
+        init_scripts = self._generate_init_scripts(profile, effective_patches, risk_limit, context)
         launch_args = self._generate_launch_args()
         behavior_delays = self._generate_behavior_delays()
 
@@ -88,37 +100,45 @@ class StealthManager:
             init_scripts=init_scripts,
             launch_args=launch_args,
             behavior_delays=behavior_delays,
+            site_policy=site_policy.name if site_policy else None,
+            effective_patches=effective_patches,
+            risk_limit=risk_limit,
+            context=context,
         )
         return self._plan
 
-    async def apply_to_context(self, context: Any) -> None:
+    async def apply_to_context(self, context: Any, url: str | None = None) -> None:
         """应用反检测设置到 Playwright 上下文.
 
         在 BrowserManager 创建上下文后调用，注入反检测脚本。
+        如果提供了 URL，会根据站点策略动态调整补丁。
 
         Args:
             context: Playwright BrowserContext 实例
+            url: 目标 URL，用于匹配站点策略
         """
         if not self._config.enabled:
             return
 
-        plan = self._plan or self.build_plan()
+        plan = self.build_plan(url) if url else (self._plan or self.build_plan())
 
         for script in plan.init_scripts:
             await context.add_init_script(script)
 
-    async def apply_to_page(self, page: Any) -> None:
+    async def apply_to_page(self, page: Any, url: str | None = None) -> None:
         """应用反检测设置到页面.
 
         将初始化脚本注入到指定页面，确保新页面也应用反检测设置。
+        如果提供了 URL，会根据站点策略动态调整补丁。
 
         Args:
             page: Playwright Page 实例
+            url: 目标 URL，用于匹配站点策略
         """
         if not self._config.enabled:
             return
 
-        plan = self._plan or self.build_plan()
+        plan = self.build_plan(url) if url else (self._plan or self.build_plan())
 
         for script in plan.init_scripts:
             await page.add_init_script(script)
@@ -169,6 +189,7 @@ class StealthManager:
         profile: StealthProfile,
         enabled_patches: list[str] | None = None,
         risk_limit: RiskLevel = "medium",
+        context: PatchContext = "main",
     ) -> list[str]:
         """生成初始化脚本列表.
 
@@ -179,16 +200,9 @@ class StealthManager:
         """
         self._validate_profile(profile)
 
-        # 使用 Patch 解析器过滤和排序补丁
-        patches = resolve_enabled_patches(
-            enabled_patches=enabled_patches or self._config.enabled_patches,
-            risk_limit=risk_limit,
-            context="main",  # 主上下文
-        )
-
+        patches = enabled_patches or []
         loader = PatchLoader(profile)
 
-        # 动态加载所有补丁
         scripts = [
             loader.load_patch(PATCH_CATALOG[name]) for name in patches if name in PATCH_CATALOG
         ]

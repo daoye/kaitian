@@ -92,14 +92,23 @@ class StealthManager:
         self,
         config: StealthConfig | None = None,
         custom_profile: StealthProfile | None = None,
+        site_policies: list[StealthSitePolicy] | None = None,
     )
-    
-    def build_plan(self) -> StealthPlan
-    """构建反检测执行计划"""
-    
-    async def apply_to_context(self, context: Any) -> None
-    """应用反检测设置到 Playwright 上下文"""
-    
+
+    def build_plan(
+        self,
+        url: str | None = None,
+        context: PatchContext = "main",
+    ) -> StealthPlan
+    """构建反检测执行计划，支持按 URL 匹配站点策略和指定上下文"""
+
+    async def apply_to_context(
+        self,
+        context: Any,
+        url: str | None = None,
+    ) -> None
+    """应用反检测设置到 Playwright 上下文，可选按 URL 匹配策略"""
+
     def get_random_delay(self, action: str) -> float
     """获取随机行为延迟（click/type/scroll/wait）"""
 ```
@@ -119,6 +128,11 @@ class StealthProfile:
     pixel_ratio: float
     hardware_concurrency: int
     device_memory: int
+    max_touch_points: int
+    mobile: bool
+    primary_pointer: str
+    hover_capable: bool
+    prefers_reduced_motion: bool
     extra_headers: dict[str, str]
 
 @dataclass
@@ -137,6 +151,10 @@ class StealthPlan:
     init_scripts: list[str]
     launch_args: list[str]
     behavior_delays: dict[str, tuple[float, float]]
+    site_policy: str | None
+    effective_patches: list[str]
+    risk_limit: str
+    context: str
 ```
 
 ## 与 browser 模块集成

@@ -148,19 +148,27 @@ class StealthSitePolicy:
 class StealthPlan:
     """反检测执行计划.
 
-    由 StealthManager 生成，包含完整的反检测执行指令。
+    由 StealthManager 生成，包含完整的反检测执行指令及策略元数据。
 
     Attributes:
         profile: 指纹画像配置
         init_scripts: 初始化时执行的 JavaScript 脚本列表
         launch_args: 浏览器启动参数
         behavior_delays: 行为延迟配置
+        site_policy: 匹配的站点策略名称，无匹配则为 None
+        effective_patches: 实际生效的补丁列表
+        risk_limit: 应用的风险级别限制
+        context: 目标执行上下文
     """
 
     profile: StealthProfile
     init_scripts: list[str] = field(default_factory=list)
     launch_args: list[str] = field(default_factory=list)
     behavior_delays: dict[str, tuple[float, float]] = field(default_factory=dict)
+    site_policy: str | None = None
+    effective_patches: list[str] = field(default_factory=list)
+    risk_limit: RiskLevel = "medium"
+    context: PatchContext = "main"
 
 
 class StealthHook(Protocol):

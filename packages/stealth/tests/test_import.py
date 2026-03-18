@@ -207,7 +207,13 @@ class TestStealthManager:
         """测试生成初始化脚本."""
         manager = StealthManager()
         profile = manager._get_profile()
-        scripts = manager._generate_init_scripts(profile)
+
+        # 获取默认启用的补丁
+        from stealth import resolve_enabled_patches
+
+        enabled_patches = resolve_enabled_patches()
+
+        scripts = manager._generate_init_scripts(profile, enabled_patches)
 
         assert len(scripts) > 0
         # 验证包含 navigator.webdriver 隐藏脚本
