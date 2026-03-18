@@ -739,3 +739,82 @@ class TestSitePolicy:
         assert "patch_a" in result
         assert "patch_b" not in result
         assert "patch_c" in result
+
+
+class TestStealthManagerSitePolicy:
+    """测试 StealthManager 与站点策略集成."""
+
+    def test_build_plan_without_url_uses_default(self):
+        """测试不提供 URL 时使用默认配置."""
+        manager = StealthManager()
+        plan = manager.build_plan()
+
+        assert plan is not None
+        assert len(plan.init_scripts) > 0
+
+    def test_build_plan_with_url_applies_site_policy(self):
+        """测试提供 URL 时应用站点策略."""
+        policies = [
+            StealthSitePolicy(
+                name="strict",
+                hosts=["*.example.com"],
+                disable_patches=["canvas", "webgl"],
+                risk_limit="low",
+            )
+        ]
+
+        manager = StealthManager(site_policies=policies)
+
+        # 带 URL 构建计划
+        plan_with_policy = manager.build_plan("https://www.example.com/page")
+        # 不带 URL 构建计划
+        plan_without_policy = manager.build_plan()
+
+        # 两个计划都应该成功生成
+        assert plan_with_policy is not None
+        assert plan_without_policy is not None
+
+    def test_build_plan_with_high_risk_policy(self):
+        """测试高风险站点策略启用高风险补丁."""
+        policies = [
+            StealthSitePolicy(
+                name="aggressive",
+                hosts=["*.aggressive.com"],
+                enable_patches=["iframe_content_window"],
+                risk_limit="high",
+            )
+        ]
+
+        manager = StealthManager(site_policies=policies)
+        plan = manager.build_plan("https://www.aggressive.com/page")
+
+        assert plan is not None
+
+    def test_build_plan_no_matching_policy(self):
+        """测试没有匹配策略时使用默认配置."""
+        policies = [
+            StealthSitePolicy(
+                name="specific",
+                hosts=["specific.com"],
+            )
+        ]
+
+        manager = StealthManager(site_policies=policies)
+        plan = manager.build_plan("https://www.other.com/page")
+
+        assert plan is not None
+        assert len(plan.init_scripts) > 0
+
+    def test_site_policies_parameter_optional(self):
+        """测试 site_policies 参数是可选的."""
+        # 不提供 site_policies
+        manager1 = StealthManager()
+        plan1 = manager1.build_plan("https://example.com")
+
+        # 提供空的 site_policies
+        manager2 = StealthManager(site_policies=[])
+        plan2 = manager2.build_plan("https://example.com")
+
+        # 两者都应该正常工作
+        assert plan1 is not None
+        assert plan2 is not None

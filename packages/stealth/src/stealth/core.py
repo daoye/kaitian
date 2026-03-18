@@ -10,10 +10,14 @@ from .types import (
     NoiseLevel,
     PATCH_CATALOG,
     PRESET_PROFILES,
+    RiskLevel,
     StealthConfig,
     StealthPlan,
     StealthProfile,
+    StealthSitePolicy,
+    apply_site_policy,
     resolve_enabled_patches,
+    resolve_site_policy,
 )
 
 
@@ -28,21 +32,28 @@ class StealthManager:
         self,
         config: StealthConfig | None = None,
         custom_profile: StealthProfile | None = None,
+        site_policies: list[StealthSitePolicy] | None = None,
     ):
         """初始化反检测管理器.
 
         Args:
             config: 反检测配置，使用默认配置如果未提供
             custom_profile: 自定义指纹画像，覆盖预设模板
+            site_policies: 站点特定策略列表，用于根据 URL 动态调整补丁
         """
         self._config = config or StealthConfig()
         self._custom_profile = custom_profile
+        self._site_policies = site_policies or []
         self._plan: StealthPlan | None = None
 
-    def build_plan(self) -> StealthPlan:
+    def build_plan(self, url: str | None = None) -> StealthPlan:
         """构建反检测执行计划.
 
         根据配置生成完整的执行计划，包括指纹配置、初始化脚本、启动参数等。
+        如果提供了 URL，会根据匹配的站点策略动态调整补丁列表和风险级别。
+
+        Args:
+            url: 目标 URL，用于匹配站点策略，如果为 None 则使用默认配置
 
         Returns:
             StealthPlan: 反检测执行计划
@@ -56,7 +67,19 @@ class StealthManager:
             )
 
         profile = self._get_profile()
-        init_scripts = self._generate_init_scripts(profile)
+
+        # 解析站点策略
+        site_policy = resolve_site_policy(url, self._site_policies) if url else None
+
+        # 根据策略调整补丁列表
+        if site_policy:
+            enabled_patches = apply_site_policy(self._config.enabled_patches, site_policy)
+            risk_limit = site_policy.risk_limit
+        else:
+            enabled_patches = self._config.enabled_patches
+            risk_limit = "medium"
+
+        init_scripts = self._generate_init_scripts(profile, enabled_patches, risk_limit)
         launch_args = self._generate_launch_args()
         behavior_delays = self._generate_behavior_delays()
 
@@ -141,7 +164,12 @@ class StealthManager:
         if errors:
             raise ValueError(f"Profile validation failed: {'; '.join(errors)}")
 
-    def _generate_init_scripts(self, profile: StealthProfile) -> list[str]:
+    def _generate_init_scripts(
+        self,
+        profile: StealthProfile,
+        enabled_patches: list[str] | None = None,
+        risk_limit: RiskLevel = "medium",
+    ) -> list[str]:
         """生成初始化脚本列表.
 
         根据启用的补丁生成对应的 JavaScript 脚本。
@@ -153,8 +181,8 @@ class StealthManager:
 
         # 使用 Patch 解析器过滤和排序补丁
         patches = resolve_enabled_patches(
-            enabled_patches=self._config.enabled_patches,
-            risk_limit="medium",  # 默认只允许 medium 及以下风险
+            enabled_patches=enabled_patches or self._config.enabled_patches,
+            risk_limit=risk_limit,
             context="main",  # 主上下文
         )
 
