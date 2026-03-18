@@ -23,6 +23,7 @@ from stealth import (
     resolve_enabled_patches,
     resolve_site_policy,
 )
+from stealth.patch_loader import PatchLoader
 
 
 class TestStealthProfile:
@@ -259,8 +260,8 @@ class TestPatches:
 
     def test_patch_navigator_webdriver(self):
         """测试 navigator.webdriver 隐藏补丁."""
-        manager = StealthManager()
-        script = manager._patch_navigator_webdriver()
+        loader = PatchLoader(StealthProfile(user_agent="Test"))
+        script = loader.load_patch(PATCH_CATALOG["navigator_webdriver"])
 
         assert "navigator" in script
         assert "webdriver" in script
@@ -268,8 +269,8 @@ class TestPatches:
 
     def test_patch_navigator_plugins(self):
         """测试 navigator.plugins 模拟补丁."""
-        manager = StealthManager()
-        script = manager._patch_navigator_plugins()
+        loader = PatchLoader(StealthProfile(user_agent="Test"))
+        script = loader.load_patch(PATCH_CATALOG["navigator_plugins"])
 
         assert "navigator" in script
         assert "plugins" in script
@@ -278,35 +279,35 @@ class TestPatches:
     def test_patch_navigator_languages(self):
         """测试 navigator.languages 补丁."""
         profile = StealthProfile(user_agent="Test", locale="zh-CN")
-        manager = StealthManager()
-        script = manager._patch_navigator_languages(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["navigator_languages"])
 
         assert "navigator" in script
         assert "languages" in script
         assert "zh-CN" in script
 
     def test_patch_navigator_vendor(self):
-        manager = StealthManager()
         profile = StealthProfile(user_agent=PRESET_PROFILES["chrome_windows"].user_agent)
-        script = manager._patch_navigator_vendor(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["navigator_vendor"])
 
         assert "navigator" in script
         assert "vendor" in script
         assert "Google Inc." in script
 
     def test_patch_navigator_platform(self):
-        manager = StealthManager()
         profile = StealthProfile(user_agent="Test", platform="Win32")
-        script = manager._patch_navigator_platform(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["navigator_platform"])
 
         assert "navigator" in script
         assert "platform" in script
         assert "Win32" in script
 
     def test_patch_navigator_hardware(self):
-        manager = StealthManager()
         profile = StealthProfile(user_agent="Test", hardware_concurrency=12, device_memory=16)
-        script = manager._patch_navigator_hardware(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["navigator_hardware"])
 
         assert "hardwareConcurrency" in script
         assert "deviceMemory" in script
@@ -314,57 +315,57 @@ class TestPatches:
         assert "16" in script
 
     def test_patch_navigator_max_touch_points(self):
-        manager = StealthManager()
         profile = StealthProfile(user_agent="Test", max_touch_points=5)
-        script = manager._patch_navigator_max_touch_points(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["navigator_max_touch_points"])
         assert "maxTouchPoints" in script
         assert "5" in script
 
     def test_patch_navigator_user_agent_data(self):
-        manager = StealthManager()
         profile = PRESET_PROFILES["chrome_windows"]
-        script = manager._patch_navigator_user_agent_data(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["navigator_user_agent_data"])
         assert "userAgentData" in script
         assert "brands" in script
         assert "getHighEntropyValues" in script
 
     def test_patch_navigator_permissions(self):
-        manager = StealthManager()
-        script = manager._patch_navigator_permissions()
+        loader = PatchLoader(StealthProfile(user_agent="Test"))
+        script = loader.load_patch(PATCH_CATALOG["navigator_permissions"])
         assert "permissions" in script
         assert "notifications" in script
 
     def test_patch_chrome_runtime(self):
-        manager = StealthManager()
-        script = manager._patch_chrome_runtime()
+        loader = PatchLoader(StealthProfile(user_agent="Test"))
+        script = loader.load_patch(PATCH_CATALOG["chrome_runtime"])
         assert "chrome" in script
         assert "runtime" in script
 
     def test_patch_iframe_content_window(self):
-        manager = StealthManager()
-        script = manager._patch_iframe_content_window()
+        loader = PatchLoader(StealthProfile(user_agent="Test"))
+        script = loader.load_patch(PATCH_CATALOG["iframe_content_window"])
         assert "iframe" in script.lower()
         assert "contentWindow" in script
 
     def test_patch_media_codecs(self):
-        manager = StealthManager()
-        script = manager._patch_media_codecs()
+        loader = PatchLoader(StealthProfile(user_agent="Test"))
+        script = loader.load_patch(PATCH_CATALOG["media_codecs"])
         assert "canPlayType" in script
         assert "video/mp4" in script
 
     def test_patch_webgl(self):
         """测试 WebGL 指纹补丁."""
         profile = StealthProfile(user_agent="Test", platform="Win32")
-        manager = StealthManager()
-        script = manager._patch_webgl(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["webgl"])
 
         assert "WebGLRenderingContext" in script
         assert "getParameter" in script
 
     def test_patch_canvas(self):
         profile = StealthProfile(user_agent="Test")
-        manager = StealthManager()
-        script = manager._patch_canvas(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["canvas"])
 
         assert "HTMLCanvasElement" in script
         assert "toDataURL" in script
@@ -377,8 +378,8 @@ class TestPatches:
             color_depth=24,
             pixel_ratio=1.0,
         )
-        manager = StealthManager()
-        script = manager._patch_screen(profile)
+        loader = PatchLoader(profile)
+        script = loader.load_patch(PATCH_CATALOG["screen"])
 
         assert "screen" in script
         assert "width" in script

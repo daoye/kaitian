@@ -4,9 +4,11 @@ import json
 import random
 from typing import Any
 
+from .patch_loader import PatchLoader
 from .scripts import load_script, load_script_with_vars
 from .types import (
     NoiseLevel,
+    PATCH_CATALOG,
     PRESET_PROFILES,
     StealthConfig,
     StealthPlan,
@@ -145,6 +147,7 @@ class StealthManager:
         根据启用的补丁生成对应的 JavaScript 脚本。
         第一个脚本必须是 device_profile，为其他补丁提供共享数据。
         使用 Patch 解析器来验证和过滤补丁列表。
+        使用 PatchLoader 统一加载逻辑，消除重复代码。
         """
         self._validate_profile(profile)
 
@@ -155,70 +158,12 @@ class StealthManager:
             context="main",  # 主上下文
         )
 
-        scripts = []
+        loader = PatchLoader(profile)
 
-        if "device_profile" in patches:
-            scripts.append(self._patch_device_profile(profile))
-
-        if "navigator_webdriver" in patches:
-            scripts.append(self._patch_navigator_webdriver())
-
-        if "navigator_plugins" in patches:
-            scripts.append(self._patch_navigator_plugins())
-
-        if "navigator_mime_types" in patches:
-            scripts.append(self._patch_navigator_mime_types())
-
-        if "navigator_languages" in patches:
-            scripts.append(self._patch_navigator_languages(profile))
-
-        if "navigator_vendor" in patches:
-            scripts.append(self._patch_navigator_vendor(profile))
-
-        if "navigator_platform" in patches:
-            scripts.append(self._patch_navigator_platform(profile))
-
-        if "navigator_hardware" in patches:
-            scripts.append(self._patch_navigator_hardware(profile))
-
-        if "navigator_max_touch_points" in patches:
-            scripts.append(self._patch_navigator_max_touch_points(profile))
-
-        if "navigator_user_agent_data" in patches:
-            scripts.append(self._patch_navigator_user_agent_data(profile))
-
-        if "navigator_permissions" in patches:
-            scripts.append(self._patch_navigator_permissions())
-
-        if "chrome_runtime" in patches:
-            scripts.append(self._patch_chrome_runtime())
-
-        if "iframe_content_window" in patches:
-            scripts.append(self._patch_iframe_content_window())
-
-        if "media_codecs" in patches:
-            scripts.append(self._patch_media_codecs())
-
-        if "match_media" in patches:
-            scripts.append(self._patch_match_media(profile))
-
-        if "visual_viewport" in patches:
-            scripts.append(self._patch_visual_viewport(profile))
-
-        if "intl" in patches:
-            scripts.append(self._patch_intl(profile))
-
-        if "media_capabilities" in patches:
-            scripts.append(self._patch_media_capabilities(profile))
-
-        if "webgl" in patches:
-            scripts.append(self._patch_webgl(profile))
-
-        if "canvas" in patches:
-            scripts.append(self._patch_canvas(profile))
-
-        if "screen" in patches:
-            scripts.append(self._patch_screen(profile))
+        # 动态加载所有补丁
+        scripts = [
+            loader.load_patch(PATCH_CATALOG[name]) for name in patches if name in PATCH_CATALOG
+        ]
 
         return scripts
 
@@ -282,224 +227,3 @@ class StealthManager:
         plan = self._plan or self.build_plan()
         min_delay, max_delay = plan.behavior_delays.get(action, (0.1, 0.3))
         return random.uniform(min_delay, max_delay)
-
-    def _patch_device_profile(self, profile: StealthProfile) -> str:
-        """注入设备画像共享基础."""
-        return load_script_with_vars(
-            "device_profile",
-            {
-                "USER_AGENT": profile.user_agent,
-                "PLATFORM": profile.platform,
-                "VENDOR": self._infer_vendor(profile.user_agent),
-                "VIEWPORT_WIDTH": profile.viewport["width"],
-                "VIEWPORT_HEIGHT": profile.viewport["height"],
-                "SCREEN_WIDTH": profile.viewport["width"],
-                "SCREEN_HEIGHT": profile.viewport["height"],
-                "COLOR_DEPTH": profile.color_depth,
-                "PIXEL_RATIO": profile.pixel_ratio,
-                "HARDWARE_CONCURRENCY": profile.hardware_concurrency,
-                "DEVICE_MEMORY": profile.device_memory,
-                "MAX_TOUCH_POINTS": profile.max_touch_points,
-                "LOCALE": profile.locale,
-                "TIMEZONE": profile.timezone,
-                "LOCALE_SHORT": profile.locale.split("-")[0],
-                "MOBILE_BOOL": "true" if profile.mobile else "false",
-                "PRIMARY_POINTER": profile.primary_pointer,
-                "HOVER_CAPABLE_BOOL": "true" if profile.hover_capable else "false",
-                "PREFERS_REDUCED_MOTION_BOOL": "true"
-                if profile.prefers_reduced_motion
-                else "false",
-                "DEVICE_SEED": f"{profile.platform}_{profile.viewport['width']}_{profile.hardware_concurrency}",
-            },
-        )
-
-    def _patch_navigator_webdriver(self) -> str:
-        """隐藏 navigator.webdriver 属性."""
-        return load_script("navigator_webdriver")
-
-    def _patch_navigator_plugins(self) -> str:
-        """模拟 navigator.plugins."""
-        return load_script("navigator_plugins")
-
-    def _patch_navigator_languages(self, profile: StealthProfile) -> str:
-        """设置 navigator.languages."""
-        return load_script_with_vars(
-            "navigator_languages",
-            {
-                "LOCALE": profile.locale,
-                "LOCALE_SHORT": profile.locale.split("-")[0],
-            },
-        )
-
-    def _patch_navigator_vendor(self, profile: StealthProfile) -> str:
-        vendor = self._infer_vendor(profile.user_agent)
-        return load_script_with_vars("navigator_vendor", {"VENDOR": vendor})
-
-    def _patch_navigator_platform(self, profile: StealthProfile) -> str:
-        return load_script_with_vars("navigator_platform", {"PLATFORM": profile.platform})
-
-    def _patch_navigator_hardware(self, profile: StealthProfile) -> str:
-        return load_script_with_vars(
-            "navigator_hardware",
-            {
-                "HARDWARE_CONCURRENCY": profile.hardware_concurrency,
-                "DEVICE_MEMORY": profile.device_memory,
-            },
-        )
-
-    def _patch_navigator_max_touch_points(self, profile: StealthProfile) -> str:
-        return load_script_with_vars(
-            "navigator_max_touch_points",
-            {"MAX_TOUCH_POINTS": profile.max_touch_points},
-        )
-
-    def _patch_navigator_user_agent_data(self, profile: StealthProfile) -> str:
-        brands = self._infer_ua_data_brands(profile.user_agent)
-        ua_full_version = self._extract_browser_version(profile.user_agent)
-        is_mobile = "Mobile" in profile.user_agent or profile.max_touch_points > 0
-        return load_script_with_vars(
-            "navigator_user_agent_data",
-            {
-                "BRANDS_JSON": json.dumps(brands),
-                "MOBILE_BOOL": "true" if is_mobile else "false",
-                "PLATFORM": profile.platform,
-                "ARCHITECTURE": "arm" if "arm" in profile.platform.lower() else "x86",
-                "BITNESS": "64",
-                "MODEL": "" if not is_mobile else "Generic Mobile",
-                "PLATFORM_VERSION": "15.0.0" if "iPhone" in profile.platform else "10.0.0",
-                "UA_FULL_VERSION": ua_full_version,
-            },
-        )
-
-    def _patch_navigator_permissions(self) -> str:
-        return load_script("navigator_permissions")
-
-    def _patch_chrome_runtime(self) -> str:
-        return load_script("chrome_runtime")
-
-    def _patch_iframe_content_window(self) -> str:
-        return load_script("iframe_content_window")
-
-    def _patch_media_codecs(self) -> str:
-        return load_script("media_codecs")
-
-    def _patch_webgl(self, profile: StealthProfile) -> str:
-        """修改 WebGL 指纹."""
-        is_intel = "Intel" in profile.platform or profile.platform in ["Win32", "MacIntel"]
-        vendor = "Intel Inc." if is_intel else "Google Inc. (NVIDIA)"
-        renderer = (
-            "Intel Iris OpenGL Engine"
-            if is_intel
-            else "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Direct3D11 vs_5_0 ps_5_0, D3D11)"
-        )
-
-        return load_script_with_vars(
-            "webgl",
-            {
-                "VENDOR": vendor,
-                "RENDERER": renderer,
-            },
-        )
-
-    def _patch_navigator_mime_types(self) -> str:
-        return load_script("navigator_mime_types")
-
-    def _patch_match_media(self, profile: StealthProfile) -> str:
-        return load_script_with_vars(
-            "match_media",
-            {
-                "PRIMARY_POINTER": profile.primary_pointer,
-                "HOVER_CAPABLE_BOOL": "true" if profile.hover_capable else "false",
-                "PREFERS_REDUCED_MOTION_BOOL": "true"
-                if profile.prefers_reduced_motion
-                else "false",
-                "MOBILE_BOOL": "true" if profile.mobile else "false",
-                "PIXEL_RATIO": profile.pixel_ratio,
-            },
-        )
-
-    def _patch_visual_viewport(self, profile: StealthProfile) -> str:
-        return load_script_with_vars(
-            "visual_viewport",
-            {
-                "VIEWPORT_WIDTH": profile.viewport["width"],
-                "VIEWPORT_HEIGHT": profile.viewport["height"],
-                "MOBILE_BOOL": "true" if profile.mobile else "false",
-            },
-        )
-
-    def _patch_intl(self, profile: StealthProfile) -> str:
-        return load_script_with_vars(
-            "intl",
-            {
-                "LOCALE": profile.locale,
-                "TIMEZONE": profile.timezone,
-                "LOCALE_SHORT": profile.locale.split("-")[0],
-            },
-        )
-
-    def _patch_media_capabilities(self, profile: StealthProfile) -> str:
-        return load_script_with_vars(
-            "media_capabilities",
-            {
-                "MOBILE_BOOL": "true" if profile.mobile else "false",
-                "DEVICE_MEMORY": profile.device_memory,
-            },
-        )
-
-    def _patch_canvas(self, profile: StealthProfile) -> str:
-        seed = f"{profile.platform}_{profile.viewport['width']}_{profile.hardware_concurrency}"
-        return load_script_with_vars(
-            "canvas",
-            {
-                "CANVAS_SEED": seed,
-            },
-        )
-
-    def _patch_screen(self, profile: StealthProfile) -> str:
-        """修改 screen 对象."""
-        return load_script_with_vars(
-            "screen",
-            {
-                "SCREEN_WIDTH": profile.viewport["width"],
-                "SCREEN_HEIGHT": profile.viewport["height"],
-                "COLOR_DEPTH": profile.color_depth,
-                "PIXEL_RATIO": profile.pixel_ratio,
-            },
-        )
-
-    def _infer_vendor(self, user_agent: str) -> str:
-        if "Chrome" in user_agent or "Edg/" in user_agent:
-            return "Google Inc."
-        if "Safari" in user_agent and "Chrome" not in user_agent:
-            return "Apple Computer, Inc."
-        return ""
-
-    def _infer_ua_data_brands(self, user_agent: str) -> list[dict[str, str]]:
-        version = self._extract_browser_version(user_agent).split(".")[0]
-        if "Edg/" in user_agent:
-            return [
-                {"brand": "Chromium", "version": version},
-                {"brand": "Microsoft Edge", "version": version},
-                {"brand": "Not.A/Brand", "version": "24"},
-            ]
-        if "Chrome/" in user_agent:
-            return [
-                {"brand": "Chromium", "version": version},
-                {"brand": "Google Chrome", "version": version},
-                {"brand": "Not.A/Brand", "version": "24"},
-            ]
-        if "Safari" in user_agent and "Chrome" not in user_agent:
-            return [
-                {"brand": "WebKit", "version": "605"},
-                {"brand": "Safari", "version": "17"},
-            ]
-        return [{"brand": "Chromium", "version": version}]
-
-    def _extract_browser_version(self, user_agent: str) -> str:
-        markers = ["Edg/", "Chrome/", "Version/", "Firefox/"]
-        for marker in markers:
-            if marker in user_agent:
-                tail = user_agent.split(marker, maxsplit=1)[1]
-                return tail.split(" ", maxsplit=1)[0]
-        return "120.0.0.0"
