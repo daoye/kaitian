@@ -26,6 +26,8 @@ class BrowserLaunchOptions:
     engine: BrowserEngine = "chromium"
     headless: bool = True
     timeout_ms: int = 30000
+    page_timeout_ms: int = 10000
+    max_contexts: int = 10  # 最大上下文数量限制
     slow_mo_ms: int = 0
     launch_args: list[str] = field(default_factory=list)
     proxy: dict[str, str] | None = None
@@ -43,6 +45,7 @@ class BrowserContextOptions:
     extra_http_headers: dict[str, str] = field(default_factory=dict)
     default_timeout_ms: int | None = None
     navigation_timeout_ms: int | None = None
+    page_creation_timeout_ms: int = 10000  # 页面创建超时（毫秒）
 
 
 @dataclass(slots=True)

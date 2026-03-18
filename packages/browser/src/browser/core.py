@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Iterable
 from typing import Any
 import importlib
@@ -13,7 +15,10 @@ from .exceptions import (
     BrowserLaunchError,
     BrowserSessionError,
 )
+from .retry import retry
 from .types import BrowserContextOptions, BrowserLaunchOptions, Cookie, RouteRule
+
+logger = logging.getLogger("browser")
 
 
 class ManagedBrowserContext:
@@ -47,7 +52,17 @@ class ManagedBrowserContext:
 
     async def new_page(self) -> Any:
         try:
-            return await self._context.new_page()
+            import asyncio
+
+            return await asyncio.wait_for(
+                self._context.new_page(),
+                timeout=self._options.page_creation_timeout_ms / 1000,
+            )
+        except asyncio.TimeoutError as exc:
+            raise BrowserContextError(
+                "page creation timed out",
+                details={"timeout_ms": self._options.page_creation_timeout_ms},
+            ) from exc
         except Exception as exc:
             raise BrowserContextError("failed to create page", details={"cause": str(exc)}) from exc
 
@@ -101,15 +116,31 @@ class BrowserManager:
         self._stealth_hook = stealth_hook
         self._playwright = None
         self._browser = None
-        self._contexts: dict[str, ManagedBrowserContext] = {}
+        self._contexts: dict[str, ManagedBrowserContext] = {}  # 复用键管理的上下文
+        self._all_contexts: list[ManagedBrowserContext] = []  # 所有创建的上下文（用于清理）
         self._default_context: ManagedBrowserContext | None = None
         self._route_rules: list[RouteRule] = []
         self._started = False
+        self._context_lock = asyncio.Lock()  # 保护上下文创建的锁
 
     async def start(self) -> "BrowserManager":
+        """启动浏览器，带重试机制."""
+        return await self._start_with_retry()
+
+    @retry(max_attempts=3, delay_ms=500, backoff=2.0, exceptions=(BrowserLaunchError,))
+    async def _start_with_retry(self) -> "BrowserManager":
+        """带重试的启动逻辑."""
         if self._started:
+            logger.debug("browser.start.skipped", extra={"reason": "already_started"})
             return self
         try:
+            logger.info(
+                "browser.start.begin",
+                extra={
+                    "engine": self._launch_options.engine,
+                    "headless": self._launch_options.headless,
+                },
+            )
             factory = self._playwright_factory
             if factory is None:
                 async_api = importlib.import_module("playwright.async_api")
@@ -122,10 +153,26 @@ class BrowserManager:
                 slow_mo=self._launch_options.slow_mo_ms,
                 proxy=self._launch_options.proxy,
                 args=self._launch_options.launch_args,
+                timeout=self._launch_options.timeout_ms,
             )
             self._started = True
+            logger.info(
+                "browser.start.success",
+                extra={
+                    "engine": self._launch_options.engine,
+                    "headless": self._launch_options.headless,
+                },
+            )
             return self
         except Exception as exc:
+            logger.error(
+                "browser.start.failed",
+                extra={
+                    "engine": self._launch_options.engine,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
             raise BrowserLaunchError(
                 "failed to launch browser", details={"cause": str(exc)}
             ) from exc
@@ -137,16 +184,84 @@ class BrowserManager:
         if self._browser is None:
             raise BrowserLaunchError("browser is not available after startup")
         context_options = options or BrowserContextOptions()
-        if context_options.reuse_key and context_options.reuse_key in self._contexts:
-            return self._contexts[context_options.reuse_key]
-        raw_context = await self._browser.new_context(
-            base_url=context_options.base_url,
-            viewport=context_options.viewport,
-            user_agent=context_options.user_agent,
-            locale=context_options.locale,
-            timezone_id=context_options.timezone_id,
-            storage_state=context_options.storage_state,
-            extra_http_headers=context_options.extra_http_headers or None,
+
+        # 使用锁保护复用键的检查和创建，防止并发竞态
+        if context_options.reuse_key:
+            async with self._context_lock:
+                if context_options.reuse_key in self._contexts:
+                    logger.debug(
+                        "browser.context.reuse",
+                        extra={
+                            "reuse_key": context_options.reuse_key,
+                        },
+                    )
+                    return self._contexts[context_options.reuse_key]
+                return await self._create_context(context_options)
+        else:
+            # 无复用键时也需要检查限制
+            async with self._context_lock:
+                return await self._create_context(context_options)
+
+    async def _create_context(
+        self, context_options: BrowserContextOptions
+    ) -> ManagedBrowserContext:
+        """实际创建上下文的逻辑（必须在持有锁的情况下调用）."""
+        # 清理已关闭的上下文
+        self._all_contexts = [ctx for ctx in self._all_contexts if not ctx._closed]
+        # 检查上下文数量限制
+        if len(self._all_contexts) >= self._launch_options.max_contexts:
+            raise BrowserContextError(
+                f"max contexts limit reached: {self._launch_options.max_contexts}",
+                details={
+                    "current": len(self._all_contexts),
+                    "limit": self._launch_options.max_contexts,
+                },
+            )
+        logger.info(
+            "browser.context.create.begin",
+            extra={
+                "reuse_key": context_options.reuse_key,
+                "base_url": context_options.base_url,
+            },
+        )
+        try:
+            raw_context = await self._browser.new_context(
+                base_url=context_options.base_url,
+                viewport=context_options.viewport,
+                user_agent=context_options.user_agent,
+                locale=context_options.locale,
+                timezone_id=context_options.timezone_id,
+                storage_state=context_options.storage_state,
+                extra_http_headers=context_options.extra_http_headers or None,
+            )
+        except FileNotFoundError as e:
+            logger.error(
+                "browser.context.create.failed",
+                extra={
+                    "error_type": "FileNotFoundError",
+                    "storage_state": context_options.storage_state,
+                },
+            )
+            raise BrowserContextError(
+                f"storage_state file not found: {e}",
+                details={"path": context_options.storage_state},
+            ) from e
+        except Exception as e:
+            logger.error(
+                "browser.context.create.failed",
+                extra={
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                },
+            )
+            raise BrowserContextError(
+                f"failed to create browser context: {e}", details={"cause": str(e)}
+            ) from e
+        logger.info(
+            "browser.context.create.success",
+            extra={
+                "reuse_key": context_options.reuse_key,
+            },
         )
         managed = await ManagedBrowserContext(
             raw_context,
@@ -154,6 +269,7 @@ class BrowserManager:
             route_rules=self._route_rules,
             stealth_hook=self._stealth_hook,
         ).initialize()
+        self._all_contexts.append(managed)
         if context_options.reuse_key:
             self._contexts[context_options.reuse_key] = managed
         return managed
@@ -221,19 +337,47 @@ class BrowserManager:
         raise BrowserSessionError("unable to infer cookie domain", details={"site": session.site})
 
     async def close(self) -> None:
-        if self._default_context is not None:
-            await self._default_context.close()
-            self._default_context = None
-        for key, context in list(self._contexts.items()):
-            await context.close()
-            self._contexts.pop(key, None)
-        if self._browser is not None:
-            await self._browser.close()
-            self._browser = None
-        if self._playwright is not None:
-            await self._playwright.stop()
-            self._playwright = None
-        self._started = False
+        if not self._started:
+            logger.debug("browser.close.skipped", extra={"reason": "not_started"})
+            return
+        logger.info(
+            "browser.close.begin",
+            extra={
+                "context_count": len(self._all_contexts),
+            },
+        )
+        try:
+            # 关闭默认上下文
+            if self._default_context is not None:
+                await self._default_context.close()
+                self._default_context = None
+            # 关闭所有追踪的上下文（避免重复关闭）
+            closed_ids = set()
+            for context in self._all_contexts:
+                if id(context) not in closed_ids:
+                    await context.close()
+                    closed_ids.add(id(context))
+            self._all_contexts.clear()
+            # 清空复用字典
+            self._contexts.clear()
+            # 关闭浏览器
+            if self._browser is not None:
+                await self._browser.close()
+                self._browser = None
+            if self._playwright is not None:
+                await self._playwright.stop()
+                self._playwright = None
+            self._started = False
+            logger.info("browser.close.success")
+        except Exception as e:
+            logger.error(
+                "browser.close.failed",
+                extra={
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                },
+            )
+            raise
 
     async def __aenter__(self) -> "BrowserManager":
         return await self.start()
