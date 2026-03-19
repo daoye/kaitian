@@ -1,5 +1,3 @@
-"""CLI 命令模块."""
+from . import auth, hello
 
-from . import hello
-
-__all__ = ["hello"]
+__all__ = ["auth", "hello"]

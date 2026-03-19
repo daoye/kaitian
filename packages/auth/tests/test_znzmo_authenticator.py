@@ -17,6 +17,7 @@ from auth.exceptions import (
 )
 from auth.sites.znzmo.authenticator import ZnzmoAuthenticator
 from auth.types import CaptchaOutcome
+from auth.verification import VerificationCodeChallenge
 from core.models import Session
 
 
@@ -348,6 +349,286 @@ class TestExceptionMapping:
             # 基础设施失败应该抛出异常
             with pytest.raises(Exception):
                 await authenticator.verify(session)
+
+
+class TestLoginModes:
+    """测试登录模式与入口 URL."""
+
+    @pytest.mark.asyncio
+    async def test_login_uses_correct_register_entry_url(self):
+        """登录应使用真实入口 register.html."""
+        authenticator = ZnzmoAuthenticator()
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.wait_for_load_state = AsyncMock()
+            mock_page.evaluate = AsyncMock(return_value="Mozilla/5.0")
+            mock_page.close = AsyncMock()
+
+            mock_user_element = AsyncMock()
+            mock_page.query_selector = AsyncMock(side_effect=[None, None, mock_user_element])
+            mock_context.cookies = AsyncMock(
+                return_value=[{"name": "session_id", "value": "test123", "domain": ".znzmo.com"}]
+            )
+
+            await authenticator.login({"username": "test_user", "password": "test_pass"})
+
+            mock_page.goto.assert_called_once_with(
+                "https://www.znzmo.com/register.html", wait_until="networkidle"
+            )
+
+    @pytest.mark.asyncio
+    async def test_sms_login_success_path(self):
+        """短信登录成功路径应返回 Session，账号ID为手机号."""
+        authenticator = ZnzmoAuthenticator()
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.wait_for_load_state = AsyncMock()
+            mock_page.evaluate = AsyncMock(return_value="Mozilla/5.0")
+            mock_page.close = AsyncMock()
+
+            mock_user_element = AsyncMock()
+            mock_page.query_selector = AsyncMock(side_effect=[None, None, mock_user_element])
+            mock_context.cookies = AsyncMock(
+                return_value=[{"name": "session_id", "value": "sms123", "domain": ".znzmo.com"}]
+            )
+
+            session = await authenticator.login(
+                {
+                    "login_mode": "sms",
+                    "phone": "13800138000",
+                    "sms_code": "123456",
+                }
+            )
+
+            assert session.site == "znzmo"
+            assert session.account_id == "13800138000"
+            assert session.metadata["account_id"] == "13800138000"
+
+    @pytest.mark.asyncio
+    async def test_sms_login_missing_fields_raises_invalid_credentials(self):
+        """短信登录缺手机号应抛出 InvalidCredentialsError."""
+        authenticator = ZnzmoAuthenticator()
+
+        with pytest.raises(InvalidCredentialsError):
+            await authenticator.login({"login_mode": "sms", "sms_code": "123456"})
+
+    @pytest.mark.asyncio
+    async def test_sms_login_waits_for_manual_code_input(self):
+        """短信登录缺少 sms_code 时应等待人工输入后继续."""
+
+        class FakeVerificationCodeProvider:
+            def __init__(self):
+                self.challenge = None
+
+            async def wait_for_code(self, challenge):
+                self.challenge = challenge
+                return "654321"
+
+        provider = FakeVerificationCodeProvider()
+        authenticator = ZnzmoAuthenticator(verification_code_provider=provider)
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.wait_for_load_state = AsyncMock()
+            mock_page.evaluate = AsyncMock(return_value="Mozilla/5.0")
+            mock_page.close = AsyncMock()
+
+            mock_user_element = AsyncMock()
+            mock_page.query_selector = AsyncMock(side_effect=[None, None, mock_user_element])
+            mock_context.cookies = AsyncMock(
+                return_value=[{"name": "session_id", "value": "sms123", "domain": ".znzmo.com"}]
+            )
+
+            session = await authenticator.login(
+                {
+                    "login_mode": "sms",
+                    "phone": "13800138000",
+                }
+            )
+
+            assert session.account_id == "13800138000"
+            challenge = provider.challenge
+            assert challenge is not None
+            assert isinstance(challenge, VerificationCodeChallenge)
+            assert challenge.site == "znzmo"
+            assert challenge.account_id == "13800138000"
+            mock_page.fill.assert_any_await(authenticator._get_selector("sms_code_input"), "654321")
+
+    @pytest.mark.asyncio
+    async def test_sms_login_manual_code_blank_raises_invalid_credentials(self):
+        """人工输入空验证码应抛出 InvalidCredentialsError."""
+
+        class BlankVerificationCodeProvider:
+            async def wait_for_code(self, challenge):
+                return "   "
+
+        authenticator = ZnzmoAuthenticator(
+            verification_code_provider=BlankVerificationCodeProvider()
+        )
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.close = AsyncMock()
+
+            with pytest.raises(InvalidCredentialsError):
+                await authenticator.login(
+                    {
+                        "login_mode": "sms",
+                        "phone": "13800138000",
+                    }
+                )
+
+    @pytest.mark.asyncio
+    async def test_sms_login_clicks_send_code_then_submit(self):
+        """短信登录应先点击获取验证码，再点击登录/注册."""
+        authenticator = ZnzmoAuthenticator()
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.wait_for_load_state = AsyncMock()
+            mock_page.evaluate = AsyncMock(return_value="Mozilla/5.0")
+            mock_page.close = AsyncMock()
+
+            mock_user_element = AsyncMock()
+            mock_page.query_selector = AsyncMock(side_effect=[None, None, mock_user_element])
+            mock_context.cookies = AsyncMock(
+                return_value=[{"name": "session_id", "value": "sms123", "domain": ".znzmo.com"}]
+            )
+
+            await authenticator.login(
+                {
+                    "login_mode": "sms",
+                    "phone": "13800138000",
+                    "sms_code": "123456",
+                }
+            )
+
+            send_code_selector = authenticator._get_selector("sms_send_code_button")
+            submit_selector = authenticator._get_selector("sms_submit_button")
+            click_calls = [call.args[0] for call in mock_page.click.await_args_list]
+
+            assert send_code_selector in click_calls
+            assert submit_selector in click_calls
+            assert click_calls.index(send_code_selector) < click_calls.index(submit_selector)
+
+    @pytest.mark.asyncio
+    async def test_sms_login_error_path_raises_login_failed(self):
+        """短信登录出现页面错误信息应抛出 LoginFailedError."""
+        authenticator = ZnzmoAuthenticator()
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.wait_for_load_state = AsyncMock()
+            mock_page.close = AsyncMock()
+
+            mock_error_element = AsyncMock()
+            mock_error_element.text_content = AsyncMock(return_value="验证码错误")
+            mock_page.query_selector = AsyncMock(side_effect=[None, mock_error_element])
+
+            with pytest.raises(LoginFailedError) as exc_info:
+                await authenticator.login(
+                    {
+                        "login_mode": "sms",
+                        "phone": "13800138000",
+                        "sms_code": "000000",
+                    }
+                )
+
+            assert exc_info.value.reason == "invalid_credentials"
+
+    @pytest.mark.asyncio
+    async def test_password_login_no_regression(self):
+        """密码登录流程应走真实弹窗：手机入口 -> 密码 tab -> 手机号/密码 -> 提交."""
+        authenticator = ZnzmoAuthenticator()
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.wait_for_load_state = AsyncMock()
+            mock_page.evaluate = AsyncMock(return_value="Mozilla/5.0")
+            mock_page.close = AsyncMock()
+
+            mock_user_element = AsyncMock()
+            mock_page.query_selector = AsyncMock(side_effect=[None, None, mock_user_element])
+            mock_context.cookies = AsyncMock(
+                return_value=[{"name": "session_id", "value": "pwd123", "domain": ".znzmo.com"}]
+            )
+
+            await authenticator.login({"username": "test_user", "password": "test_pass"})
+
+            mock_page.click.assert_any_await(authenticator._get_selector("phone_login_button"))
+            mock_page.click.assert_any_await(authenticator._get_selector("password_tab"))
+            mock_page.fill.assert_any_await(
+                authenticator._get_selector("password_phone_input"), "test_user"
+            )
+            mock_page.fill.assert_any_await(
+                authenticator._get_selector("password_input"), "test_pass"
+            )
+            mock_page.click.assert_any_await(authenticator._get_selector("login_button"))
 
 
 class TestCaptchaHandling:

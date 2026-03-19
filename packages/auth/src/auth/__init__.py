@@ -5,6 +5,11 @@ from .manager import AuthManager
 from .repository import SessionRepository
 from .sites import ZnzmoAuthenticator
 from .types import Credentials, CaptchaOutcome, VerifyResult
+from .verification import (
+    VerificationCodeChallenge,
+    VerificationCodeProvider,
+    ConsoleVerificationCodeProvider,
+)
 from .exceptions import (
     AuthError,
     SessionNotFoundError,
@@ -26,6 +31,9 @@ __all__ = [
     "Credentials",
     "CaptchaOutcome",
     "VerifyResult",
+    "VerificationCodeChallenge",
+    "VerificationCodeProvider",
+    "ConsoleVerificationCodeProvider",
     # 异常
     "AuthError",
     "SessionNotFoundError",

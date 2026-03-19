@@ -26,6 +26,11 @@ from auth.exceptions import (
     SessionExpiredError,
 )
 from auth.types import CaptchaOutcome
+from auth.verification import (
+    ConsoleVerificationCodeProvider,
+    VerificationCodeChallenge,
+    VerificationCodeProvider,
+)
 
 logger = logging.getLogger("auth.znzmo")
 
@@ -59,14 +64,21 @@ class ZnzmoAuthenticator(Authenticator):
 
     # 知末网相关配置
     BASE_URL = "https://www.znzmo.com"
-    LOGIN_URL = "https://www.znzmo.com/login"
+    LOGIN_URL = "https://www.znzmo.com/register.html"
     USER_CENTER_URL = "https://www.znzmo.com/personalCenter"
 
     # 默认页面选择器
     DEFAULT_SELECTORS = {
-        "username_input": "input[name='username']",
-        "password_input": "input[name='password']",
-        "login_button": "button[type='submit']",
+        "phone_login_button": "text=手机",
+        "password_tab": "text=账号密码登录",
+        "password_phone_input": "input[placeholder='请输入手机号']",
+        "password_input": "input[placeholder='请输入密码']",
+        "login_button": "text=登录/注册",
+        "sms_tab": "text=手机验证码登录",
+        "sms_phone_input": "input[placeholder='请输入手机号']",
+        "sms_code_input": "input[placeholder='请输入验证码']",
+        "sms_send_code_button": "text=获取手机验证码",
+        "sms_submit_button": "text=登录/注册",
         "captcha_image": ".captcha-img",
         "captcha_input": "input[name='captcha']",
         "error_message": ".error-message",
@@ -80,6 +92,8 @@ class ZnzmoAuthenticator(Authenticator):
         timeout: int = 30000,
         selectors: Optional[Dict[str, str]] = None,
         stealth_hook: Optional[Callable] = None,
+        verification_code_provider: Optional[VerificationCodeProvider] = None,
+        headless: bool = True,
     ):
         """初始化认证适配器.
 
@@ -93,11 +107,35 @@ class ZnzmoAuthenticator(Authenticator):
         self._timeout = timeout
         self._selectors = {**self.DEFAULT_SELECTORS, **(selectors or {})}
         self._stealth_hook = stealth_hook
-        self._browser_manager = BrowserManager(stealth_hook=stealth_hook)
+        self._verification_code_provider = (
+            verification_code_provider or ConsoleVerificationCodeProvider()
+        )
+        self._browser_manager = BrowserManager(
+            launch_options=BrowserLaunchOptions(headless=headless),
+            stealth_hook=stealth_hook,
+        )
 
     def _get_selector(self, key: str) -> str:
         """获取选择器."""
         return self._selectors.get(key, self.DEFAULT_SELECTORS.get(key, ""))
+
+    async def _switch_login_mode(self, page: Any, login_mode: str) -> None:
+        """切换到指定登录模式的真实弹窗流程."""
+        try:
+            await page.click(self._get_selector("phone_login_button"))
+        except Exception:
+            # 某些场景已在手机登录弹窗中，允许继续尝试 tab 切换
+            pass
+
+        if login_mode == "sms":
+            await page.click(self._get_selector("sms_tab"))
+            return
+
+        if login_mode == "password":
+            await page.click(self._get_selector("password_tab"))
+            return
+
+        raise InvalidCredentialsError("login_mode must be 'password' or 'sms'")
 
     async def _close_page_safely(self, page: Any) -> None:
         """安全关闭页面，忽略已关闭错误."""
@@ -147,6 +185,38 @@ class ZnzmoAuthenticator(Authenticator):
 
         return username.strip(), password
 
+    def _validate_sms_credentials(self, credentials: Dict[str, Any]) -> tuple[str, Optional[str]]:
+        phone = credentials.get("phone")
+        sms_code = credentials.get("sms_code")
+
+        if not phone:
+            logger.warning(
+                "auth.znzmo.login.failed",
+                extra={"reason": "missing_sms_credentials"},
+            )
+            raise InvalidCredentialsError("Phone is required for SMS login")
+
+        if not isinstance(phone, str) or not phone.strip():
+            raise InvalidCredentialsError("Phone must be a non-empty string")
+
+        if sms_code is not None and (not isinstance(sms_code, str) or not sms_code.strip()):
+            raise InvalidCredentialsError("sms_code must be a non-empty string")
+
+        return phone.strip(), sms_code.strip() if isinstance(sms_code, str) else None
+
+    async def _wait_for_sms_code(self, phone: str) -> str:
+        challenge = VerificationCodeChallenge(
+            site="znzmo",
+            account_id=phone,
+            channel="sms",
+            prompt=f"请输入知末短信验证码（手机号: {phone}）: ",
+            metadata={"login_url": self.LOGIN_URL},
+        )
+        sms_code = await self._verification_code_provider.wait_for_code(challenge)
+        if not isinstance(sms_code, str) or not sms_code.strip():
+            raise InvalidCredentialsError("sms_code must be a non-empty string")
+        return sms_code.strip()
+
     def _map_browser_exception(self, exc: Exception, context: str) -> AuthError:
         """将 browser 异常映射为 auth 标准异常.
 
@@ -190,9 +260,19 @@ class ZnzmoAuthenticator(Authenticator):
             CaptchaRequiredError: 需要验证码
             LoginFailedError: 登录失败（凭据错误、页面错误等）
         """
-        username, password = self._validate_credentials(credentials)
+        login_mode = credentials.get("login_mode", "password")
+        if login_mode == "sms":
+            account_id, sms_code = self._validate_sms_credentials(credentials)
+            username = None
+            password = None
+        elif login_mode == "password":
+            account_id, password = self._validate_credentials(credentials)
+            username = account_id
+            sms_code = None
+        else:
+            raise InvalidCredentialsError("login_mode must be 'password' or 'sms'")
 
-        logger.info("auth.znzmo.login.begin", extra={"username": username})
+        logger.info("auth.znzmo.login.begin", extra={"account_id": account_id, "mode": login_mode})
 
         context = None
         page = None
@@ -241,10 +321,21 @@ class ZnzmoAuthenticator(Authenticator):
                     details={"url": self.LOGIN_URL, "error": str(exc)},
                 ) from exc
 
-            # 填写用户名和密码
+            # 填写登录表单
             try:
-                await page.fill(self._get_selector("username_input"), username)
-                await page.fill(self._get_selector("password_input"), password)
+                await self._switch_login_mode(page, login_mode)
+
+                if login_mode == "sms":
+                    await page.fill(self._get_selector("sms_phone_input"), account_id)
+                    await page.click(self._get_selector("sms_send_code_button"))
+                    if sms_code is None:
+                        sms_code = await self._wait_for_sms_code(account_id)
+                    await page.fill(self._get_selector("sms_code_input"), sms_code)
+                else:
+                    await page.fill(self._get_selector("password_phone_input"), username)
+                    await page.fill(self._get_selector("password_input"), password)
+            except InvalidCredentialsError:
+                raise
             except Exception as exc:
                 raise LoginFailedError(
                     "Failed to fill login form",
@@ -257,7 +348,10 @@ class ZnzmoAuthenticator(Authenticator):
 
             # 点击登录按钮
             try:
-                await page.click(self._get_selector("login_button"))
+                if login_mode == "sms":
+                    await page.click(self._get_selector("sms_submit_button"))
+                else:
+                    await page.click(self._get_selector("login_button"))
             except Exception as exc:
                 raise LoginFailedError(
                     "Failed to click login button",
@@ -326,7 +420,7 @@ class ZnzmoAuthenticator(Authenticator):
             session = Session(
                 session_id=str(uuid.uuid4()),
                 site="znzmo",  # 短键用于 repository 索引
-                account_id=username,
+                account_id=account_id,
                 cookies=cookie_dict,
                 headers={"User-Agent": user_agent} if user_agent else {},
                 expires_at=datetime.now() + timedelta(days=7),
@@ -335,14 +429,14 @@ class ZnzmoAuthenticator(Authenticator):
                     "login_url": self.LOGIN_URL,
                     "cookie_domain": ".znzmo.com",  # 关键：供 browser 模块使用
                     "user_agent": user_agent,
-                    "account_id": username,
+                    "account_id": account_id,
                 },
             )
 
             logger.info(
                 "auth.znzmo.login.success",
                 extra={
-                    "username": username,
+                    "account_id": account_id,
                     "session_id": session.session_id,
                 },
             )
