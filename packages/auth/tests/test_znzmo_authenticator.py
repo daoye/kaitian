@@ -383,7 +383,7 @@ class TestLoginModes:
             await authenticator.login({"username": "test_user", "password": "test_pass"})
 
             mock_page.goto.assert_called_once_with(
-                "https://www.znzmo.com/register.html", wait_until="networkidle"
+                "https://www.znzmo.com/register.html", wait_until="domcontentloaded"
             )
 
     @pytest.mark.asyncio

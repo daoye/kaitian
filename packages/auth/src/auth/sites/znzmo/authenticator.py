@@ -10,6 +10,8 @@
 """
 
 import logging
+import asyncio
+import inspect
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Optional
@@ -119,20 +121,218 @@ class ZnzmoAuthenticator(Authenticator):
         """获取选择器."""
         return self._selectors.get(key, self.DEFAULT_SELECTORS.get(key, ""))
 
+    async def _read_selector_state(self, page: Any, selector: str) -> dict[str, Any]:
+        locator_method = getattr(page, "locator", None)
+        if locator_method is None or inspect.iscoroutinefunction(locator_method):
+            return {"exists": True, "visible": True, "enabled": True, "value": None}
+
+        locator_result = locator_method(selector)
+
+        locator = locator_result.first
+        count = await locator_result.count()
+        if count == 0:
+            return {"exists": False, "visible": False, "enabled": False, "value": None}
+
+        visible = False
+        enabled = False
+        value = None
+
+        try:
+            visible = await locator.is_visible()
+        except Exception:
+            visible = False
+
+        try:
+            enabled = await locator.is_enabled()
+        except Exception:
+            enabled = False
+
+        try:
+            value = await locator.input_value()
+        except Exception:
+            value = None
+
+        return {
+            "exists": True,
+            "visible": visible,
+            "enabled": enabled,
+            "value": value,
+        }
+
+    async def _dispatch_input_events(self, page: Any, selector: str) -> None:
+        locator_method = getattr(page, "locator", None)
+        if locator_method is None or inspect.iscoroutinefunction(locator_method):
+            return
+
+        locator_result = locator_method(selector)
+
+        await locator_result.first.evaluate(
+            """
+            (element) => {
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+                if (typeof element.blur === 'function') {
+                    element.blur();
+                }
+            }
+            """
+        )
+
+    async def _wait_for_login_flow_ready(self, page: Any, login_mode: str) -> None:
+        relevant_selectors = [self._get_selector("phone_login_button")]
+        if login_mode == "sms":
+            relevant_selectors.extend(
+                [self._get_selector("sms_phone_input"), self._get_selector("sms_tab")]
+            )
+        else:
+            relevant_selectors.extend(
+                [self._get_selector("password_phone_input"), self._get_selector("password_tab")]
+            )
+
+        deadline = asyncio.get_running_loop().time() + min(self._timeout, 8000) / 1000
+        while asyncio.get_running_loop().time() < deadline:
+            for selector in relevant_selectors:
+                if not selector:
+                    continue
+                state = await self._read_selector_state(page, selector)
+                if state.get("exists") and state.get("visible"):
+                    return
+            await asyncio.sleep(0.2)
+
+        raise LoginFailedError(
+            "Login dialog did not become ready",
+            reason="login_dialog_not_ready",
+        )
+
+    async def _wait_for_sms_send_ready(self, page: Any, phone: str) -> None:
+        phone_selector = self._get_selector("sms_phone_input")
+        send_selector = self._get_selector("sms_send_code_button")
+
+        await page.fill(phone_selector, phone)
+        await self._dispatch_input_events(page, phone_selector)
+
+        deadline = asyncio.get_running_loop().time() + min(self._timeout, 5000) / 1000
+        while asyncio.get_running_loop().time() < deadline:
+            phone_state = await self._read_selector_state(page, phone_selector)
+            send_state = await self._read_selector_state(page, send_selector)
+            if not isinstance(phone_state, dict) or not isinstance(send_state, dict):
+                return
+            if (
+                phone_state.get("exists")
+                and (phone_state.get("value") == phone or phone_state.get("value") is None)
+                and send_state.get("exists")
+                and send_state.get("visible")
+                and send_state.get("enabled")
+            ):
+                return
+            await asyncio.sleep(0.2)
+
+        raise LoginFailedError(
+            "SMS send button did not become ready",
+            reason="sms_send_not_ready",
+            details={"phone": phone},
+        )
+
+    async def _read_login_error(self, page: Any) -> str | None:
+        error_element = await page.query_selector(self._get_selector("error_message"))
+        if error_element is None:
+            return None
+        error_text = await error_element.text_content()
+        if error_text is None:
+            return None
+        cleaned = error_text.strip()
+        return cleaned or None
+
+    async def _has_user_indicator(self, page: Any) -> bool:
+        user_element = await page.query_selector(
+            f"{self._get_selector('user_avatar')}, {self._get_selector('user_name')}"
+        )
+        return user_element is not None
+
+    async def _is_login_modal_visible(self, page: Any, login_mode: str) -> bool:
+        selectors = [self._get_selector("phone_login_button")]
+        if login_mode == "sms":
+            selectors.extend(
+                [self._get_selector("sms_phone_input"), self._get_selector("sms_code_input")]
+            )
+        else:
+            selectors.extend(
+                [self._get_selector("password_phone_input"), self._get_selector("password_input")]
+            )
+
+        for selector in selectors:
+            if not selector:
+                continue
+            element = await page.query_selector(selector)
+            if element is not None:
+                return True
+        return False
+
+    async def _extract_cookie_dict(self, context: Any) -> dict[str, str]:
+        cookies = await context.cookies()
+        return {cookie["name"]: cookie["value"] for cookie in cookies}
+
+    async def _wait_for_login_outcome(
+        self,
+        page: Any,
+        context: Any,
+        login_mode: str,
+    ) -> tuple[str, dict[str, str], str | None]:
+        deadline = asyncio.get_running_loop().time() + self._timeout / 1000
+        last_cookie_dict: dict[str, str] = {}
+
+        while asyncio.get_running_loop().time() < deadline:
+            error_text = await self._read_login_error(page)
+            if error_text is not None:
+                return ("error", last_cookie_dict, error_text)
+
+            if await self._has_user_indicator(page):
+                return ("success", await self._extract_cookie_dict(context), None)
+
+            cookie_dict = await self._extract_cookie_dict(context)
+            if cookie_dict:
+                last_cookie_dict = cookie_dict
+                if not await self._is_login_modal_visible(page, login_mode):
+                    return ("success", cookie_dict, None)
+
+            await asyncio.sleep(0.2)
+
+        return ("timeout", last_cookie_dict, None)
+
     async def _switch_login_mode(self, page: Any, login_mode: str) -> None:
         """切换到指定登录模式的真实弹窗流程."""
-        try:
+        if login_mode == "sms":
+            sms_phone_state = await self._read_selector_state(
+                page, self._get_selector("sms_phone_input")
+            )
+            sms_code_state = await self._read_selector_state(
+                page, self._get_selector("sms_code_input")
+            )
+            if (
+                sms_phone_state.get("exists")
+                and sms_phone_state.get("visible")
+                and sms_code_state.get("exists")
+            ):
+                return
+
+        phone_button_state = await self._read_selector_state(
+            page, self._get_selector("phone_login_button")
+        )
+        if phone_button_state.get("exists") and phone_button_state.get("visible"):
             await page.click(self._get_selector("phone_login_button"))
-        except Exception:
-            # 某些场景已在手机登录弹窗中，允许继续尝试 tab 切换
-            pass
 
         if login_mode == "sms":
-            await page.click(self._get_selector("sms_tab"))
+            sms_tab_state = await self._read_selector_state(page, self._get_selector("sms_tab"))
+            if sms_tab_state.get("exists") and sms_tab_state.get("visible"):
+                await page.click(self._get_selector("sms_tab"))
             return
 
         if login_mode == "password":
-            await page.click(self._get_selector("password_tab"))
+            password_tab_state = await self._read_selector_state(
+                page, self._get_selector("password_tab")
+            )
+            if password_tab_state.get("exists") and password_tab_state.get("visible"):
+                await page.click(self._get_selector("password_tab"))
             return
 
         raise InvalidCredentialsError("login_mode must be 'password' or 'sms'")
@@ -313,7 +513,7 @@ class ZnzmoAuthenticator(Authenticator):
 
             # 访问登录页面
             try:
-                await page.goto(self.LOGIN_URL, wait_until="networkidle")
+                await page.goto(self.LOGIN_URL, wait_until="domcontentloaded")
             except Exception as exc:
                 raise LoginFailedError(
                     "Failed to navigate to login page",
@@ -323,14 +523,16 @@ class ZnzmoAuthenticator(Authenticator):
 
             # 填写登录表单
             try:
+                await self._wait_for_login_flow_ready(page, login_mode)
                 await self._switch_login_mode(page, login_mode)
 
                 if login_mode == "sms":
-                    await page.fill(self._get_selector("sms_phone_input"), account_id)
+                    await self._wait_for_sms_send_ready(page, account_id)
                     await page.click(self._get_selector("sms_send_code_button"))
                     if sms_code is None:
                         sms_code = await self._wait_for_sms_code(account_id)
                     await page.fill(self._get_selector("sms_code_input"), sms_code)
+                    await self._dispatch_input_events(page, self._get_selector("sms_code_input"))
                 else:
                     await page.fill(self._get_selector("password_phone_input"), username)
                     await page.fill(self._get_selector("password_input"), password)
@@ -359,17 +561,12 @@ class ZnzmoAuthenticator(Authenticator):
                     details={"error": str(exc)},
                 ) from exc
 
-            # 等待登录结果
-            try:
-                await page.wait_for_load_state("networkidle", timeout=self._timeout)
-            except Exception:
-                # 超时继续检查状态
-                pass
-
-            # 检查登录错误
-            error_element = await page.query_selector(self._get_selector("error_message"))
-            if error_element:
-                error_text = await error_element.text_content()
+            outcome, cookie_dict, error_text = await self._wait_for_login_outcome(
+                page,
+                context,
+                login_mode,
+            )
+            if outcome == "error" and error_text is not None:
                 logger.warning(
                     "auth.znzmo.login.failed",
                     extra={
@@ -383,26 +580,22 @@ class ZnzmoAuthenticator(Authenticator):
                     details={"error_text": error_text},
                 )
 
-            # 检查是否登录成功
-            user_element = await page.query_selector(
-                f"{self._get_selector('user_avatar')}, {self._get_selector('user_name')}"
-            )
-            if not user_element:
+            if outcome != "success":
                 logger.warning(
                     "auth.znzmo.login.failed",
                     extra={
-                        "reason": "user_indicator_not_found",
+                        "reason": "login_outcome_timeout",
                     },
                 )
                 raise LoginFailedError(
-                    "Login may have failed - user indicator not found",
-                    reason="unknown",
+                    "Login may have failed - no stable success signal observed",
+                    reason="login_outcome_timeout",
                 )
 
             # 提取 cookies
             try:
-                cookies = await context.cookies()
-                cookie_dict = {c["name"]: c["value"] for c in cookies}
+                if not cookie_dict:
+                    cookie_dict = await self._extract_cookie_dict(context)
             except Exception as exc:
                 raise LoginFailedError(
                     "Failed to extract cookies",
@@ -730,7 +923,11 @@ class ZnzmoAuthenticator(Authenticator):
                 f"{self._get_selector('user_avatar')}, {self._get_selector('user_name')}"
             )
 
-            is_valid = user_element is not None
+            if user_element is not None:
+                logger.debug("auth.znzmo.verify.result", extra={"is_valid": True})
+                return True
+
+            is_valid = "/personalCenter" in current_url and "/login" not in current_url
             logger.debug("auth.znzmo.verify.result", extra={"is_valid": is_valid})
             return is_valid
 
