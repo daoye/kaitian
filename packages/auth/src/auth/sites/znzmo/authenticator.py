@@ -272,6 +272,13 @@ class ZnzmoAuthenticator(Authenticator):
         cookies = await context.cookies()
         return {cookie["name"]: cookie["value"] for cookie in cookies}
 
+    def _is_transient_navigation_error(self, exc: Exception) -> bool:
+        message = str(exc)
+        return (
+            "Execution context was destroyed" in message
+            or "most likely because of a navigation" in message
+        )
+
     async def _wait_for_login_outcome(
         self,
         page: Any,
@@ -282,17 +289,38 @@ class ZnzmoAuthenticator(Authenticator):
         last_cookie_dict: dict[str, str] = {}
 
         while asyncio.get_running_loop().time() < deadline:
-            error_text = await self._read_login_error(page)
+            try:
+                error_text = await self._read_login_error(page)
+            except Exception as exc:
+                if self._is_transient_navigation_error(exc):
+                    await asyncio.sleep(0.2)
+                    continue
+                raise
             if error_text is not None:
                 return ("error", last_cookie_dict, error_text)
 
-            if await self._has_user_indicator(page):
+            try:
+                has_user_indicator = await self._has_user_indicator(page)
+            except Exception as exc:
+                if self._is_transient_navigation_error(exc):
+                    await asyncio.sleep(0.2)
+                    continue
+                raise
+
+            if has_user_indicator:
                 return ("success", await self._extract_cookie_dict(context), None)
 
             cookie_dict = await self._extract_cookie_dict(context)
             if cookie_dict:
                 last_cookie_dict = cookie_dict
-                if not await self._is_login_modal_visible(page, login_mode):
+                try:
+                    login_modal_visible = await self._is_login_modal_visible(page, login_mode)
+                except Exception as exc:
+                    if self._is_transient_navigation_error(exc):
+                        await asyncio.sleep(0.2)
+                        continue
+                    raise
+                if not login_modal_visible:
                     return ("success", cookie_dict, None)
 
             await asyncio.sleep(0.2)

@@ -593,6 +593,59 @@ class TestLoginModes:
             assert exc_info.value.reason == "invalid_credentials"
 
     @pytest.mark.asyncio
+    async def test_sms_login_tolerates_navigation_during_outcome_polling(self):
+        """提交后若页面正在导航，不应因 execution context destroyed 立即失败."""
+        authenticator = ZnzmoAuthenticator()
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.wait_for_load_state = AsyncMock()
+            mock_page.evaluate = AsyncMock(return_value="Mozilla/5.0")
+            mock_page.close = AsyncMock()
+
+            navigation_error = Exception(
+                "Page.query_selector: Execution context was destroyed, most likely because of a navigation"
+            )
+            query_states = iter([None, navigation_error, None, None])
+
+            async def query_selector_side_effect(*args, **kwargs):
+                try:
+                    value = next(query_states)
+                except StopIteration:
+                    return None
+                if isinstance(value, Exception):
+                    raise value
+                return value
+
+            mock_page.query_selector = AsyncMock(side_effect=query_selector_side_effect)
+            mock_context.cookies = AsyncMock(
+                side_effect=[
+                    [],
+                    [{"name": "session_id", "value": "sms123", "domain": ".znzmo.com"}],
+                    [{"name": "session_id", "value": "sms123", "domain": ".znzmo.com"}],
+                ]
+            )
+
+            session = await authenticator.login(
+                {
+                    "login_mode": "sms",
+                    "phone": "13800138000",
+                    "sms_code": "123456",
+                }
+            )
+
+            assert session.account_id == "13800138000"
+
+    @pytest.mark.asyncio
     async def test_password_login_no_regression(self):
         """密码登录流程应走真实弹窗：手机入口 -> 密码 tab -> 手机号/密码 -> 提交."""
         authenticator = ZnzmoAuthenticator()
