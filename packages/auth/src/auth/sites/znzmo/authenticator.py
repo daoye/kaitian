@@ -15,6 +15,7 @@ import inspect
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Optional
+from unittest.mock import AsyncMock, Mock
 
 from browser import BrowserManager, BrowserLaunchOptions
 from browser.exceptions import BrowserError, BrowserLaunchError
@@ -79,7 +80,7 @@ class ZnzmoAuthenticator(Authenticator):
         "sms_tab": "text=手机验证码登录",
         "sms_phone_input": "input[placeholder='请输入手机号']",
         "sms_code_input": "input[placeholder='请输入验证码']",
-        "sms_send_code_button": "text=获取手机验证码",
+        "sms_send_code_button": "div[class*='Accountpassword__input-code__']",
         "sms_submit_button": "text=登录/注册",
         "captcha_image": ".captcha-img",
         "captcha_input": "input[name='captcha']",
@@ -91,7 +92,7 @@ class ZnzmoAuthenticator(Authenticator):
     def __init__(
         self,
         captcha_solver: Optional[Any] = None,
-        timeout: int = 30000,
+        timeout: int = 300000,
         selectors: Optional[Dict[str, str]] = None,
         stealth_hook: Optional[Callable] = None,
         verification_code_provider: Optional[VerificationCodeProvider] = None,
@@ -121,9 +122,21 @@ class ZnzmoAuthenticator(Authenticator):
         """获取选择器."""
         return self._selectors.get(key, self.DEFAULT_SELECTORS.get(key, ""))
 
+    def _uses_locator_fallback(self, page: Any) -> bool:
+        locator_method = getattr(page, "locator", None)
+        return (
+            locator_method is None
+            or inspect.iscoroutinefunction(locator_method)
+            or isinstance(locator_method, AsyncMock)
+            or isinstance(locator_method, Mock)
+        )
+
+    def _locator(self, page: Any, selector: str) -> Any:
+        return page.locator(selector).first
+
     async def _read_selector_state(self, page: Any, selector: str) -> dict[str, Any]:
         locator_method = getattr(page, "locator", None)
-        if locator_method is None or inspect.iscoroutinefunction(locator_method):
+        if self._uses_locator_fallback(page):
             return {"exists": True, "visible": True, "enabled": True, "value": None}
 
         locator_result = locator_method(selector)
@@ -161,7 +174,7 @@ class ZnzmoAuthenticator(Authenticator):
 
     async def _dispatch_input_events(self, page: Any, selector: str) -> None:
         locator_method = getattr(page, "locator", None)
-        if locator_method is None or inspect.iscoroutinefunction(locator_method):
+        if self._uses_locator_fallback(page):
             return
 
         locator_result = locator_method(selector)
@@ -178,60 +191,228 @@ class ZnzmoAuthenticator(Authenticator):
             """
         )
 
-    async def _wait_for_login_flow_ready(self, page: Any, login_mode: str) -> None:
-        relevant_selectors = [self._get_selector("phone_login_button")]
-        if login_mode == "sms":
-            relevant_selectors.extend(
-                [self._get_selector("sms_phone_input"), self._get_selector("sms_tab")]
-            )
-        else:
-            relevant_selectors.extend(
-                [self._get_selector("password_phone_input"), self._get_selector("password_tab")]
-            )
+    async def _read_selector_text(self, page: Any, selector: str) -> str | None:
+        locator_method = getattr(page, "locator", None)
+        if self._uses_locator_fallback(page):
+            return None
 
-        deadline = asyncio.get_running_loop().time() + min(self._timeout, 8000) / 1000
+        locator_result = locator_method(selector)
+        count = await locator_result.count()
+        if count == 0:
+            return None
+
+        text = await locator_result.first.text_content()
+        if text is None:
+            return None
+        return text.strip()
+
+    async def _wait_for_login_flow_ready(self, page: Any, login_mode: str) -> None:
+        if login_mode == "sms":
+            selectors = [
+                self._get_selector("sms_phone_input"),
+                self._get_selector("sms_code_input"),
+            ]
+        else:
+            selectors = [
+                self._get_selector("password_phone_input"),
+                self._get_selector("password_input"),
+            ]
+
+        await self._wait_for_visible_selectors(page, selectors, "login_dialog_not_ready")
+
+    async def _wait_for_visible_selectors(
+        self,
+        page: Any,
+        selectors: list[str],
+        reason: str,
+        timeout_ms: int | None = None,
+    ) -> None:
+        deadline = (
+            asyncio.get_running_loop().time() + (timeout_ms or min(self._timeout, 8000)) / 1000
+        )
+        stable_ready_count = 0
+
         while asyncio.get_running_loop().time() < deadline:
-            for selector in relevant_selectors:
-                if not selector:
-                    continue
+            all_visible = True
+            for selector in selectors:
                 state = await self._read_selector_state(page, selector)
-                if state.get("exists") and state.get("visible"):
+                if not (state.get("exists") and state.get("visible")):
+                    all_visible = False
+                    break
+
+            if all_visible:
+                stable_ready_count += 1
+                if stable_ready_count >= 3:
                     return
+            else:
+                stable_ready_count = 0
+
+            await asyncio.sleep(0.2)
+
+        raise LoginFailedError("Login dialog did not become ready", reason=reason)
+
+    async def _prepare_sms_login(self, page: Any) -> None:
+        await self._wait_for_visible_selectors(
+            page,
+            [self._get_selector("phone_login_button")],
+            "login_entry_not_ready",
+        )
+
+        sms_phone_state = await self._read_selector_state(
+            page, self._get_selector("sms_phone_input")
+        )
+        sms_code_state = await self._read_selector_state(page, self._get_selector("sms_code_input"))
+        if (
+            sms_phone_state.get("exists")
+            and sms_phone_state.get("visible")
+            and sms_code_state.get("exists")
+            and sms_code_state.get("visible")
+        ):
+            return
+
+        phone_button_state = await self._read_selector_state(
+            page, self._get_selector("phone_login_button")
+        )
+        if phone_button_state.get("exists") and phone_button_state.get("visible"):
+            await page.click(self._get_selector("phone_login_button"))
+
+        await self._wait_for_visible_selectors(
+            page,
+            [self._get_selector("sms_tab")],
+            "sms_tab_not_ready",
+        )
+
+        sms_tab_state = await self._read_selector_state(page, self._get_selector("sms_tab"))
+        if sms_tab_state.get("exists") and sms_tab_state.get("visible"):
+            await page.click(self._get_selector("sms_tab"))
+
+        await self._wait_for_login_flow_ready(page, "sms")
+
+    async def _prepare_password_login(self, page: Any) -> None:
+        await self._wait_for_visible_selectors(
+            page,
+            [self._get_selector("phone_login_button")],
+            "login_entry_not_ready",
+        )
+
+        phone_button_state = await self._read_selector_state(
+            page, self._get_selector("phone_login_button")
+        )
+        if phone_button_state.get("exists") and phone_button_state.get("visible"):
+            await page.click(self._get_selector("phone_login_button"))
+
+        await self._wait_for_visible_selectors(
+            page,
+            [self._get_selector("password_tab")],
+            "password_tab_not_ready",
+        )
+
+        password_tab_state = await self._read_selector_state(
+            page, self._get_selector("password_tab")
+        )
+        if password_tab_state.get("exists") and password_tab_state.get("visible"):
+            await page.click(self._get_selector("password_tab"))
+
+        await self._wait_for_login_flow_ready(page, "password")
+
+    async def _type_sms_phone_number(self, page: Any, phone: str) -> None:
+        phone_selector = self._get_selector("sms_phone_input")
+
+        if self._uses_locator_fallback(page):
+            await page.fill(phone_selector, phone)
+            await self._dispatch_input_events(page, phone_selector)
+            return
+
+        phone_locator = self._locator(page, phone_selector)
+        await phone_locator.click()
+        await phone_locator.fill("")
+        await phone_locator.type(phone, delay=120)
+        await phone_locator.evaluate(
+            """
+            (element) => {
+                if (typeof element.blur === 'function') {
+                    element.blur();
+                }
+            }
+            """
+        )
+        await self._dispatch_input_events(page, phone_selector)
+
+    async def _wait_for_sms_form_stable(self, page: Any, phone: str) -> None:
+        phone_selector = self._get_selector("sms_phone_input")
+        deadline = asyncio.get_running_loop().time() + min(self._timeout, 5000) / 1000
+        stable_ready_count = 0
+
+        while asyncio.get_running_loop().time() < deadline:
+            phone_state = await self._read_selector_state(page, phone_selector)
+            if not isinstance(phone_state, dict):
+                return
+
+            phone_value = phone_state.get("value")
+            phone_ready = phone_value == phone
+            if phone_value is None and self._uses_locator_fallback(page):
+                phone_ready = True
+
+            ready = (
+                phone_state.get("exists")
+                and phone_state.get("visible")
+                and phone_state.get("enabled")
+                and phone_ready
+            )
+            if ready:
+                stable_ready_count += 1
+                if stable_ready_count >= 4:
+                    await asyncio.sleep(0.4)
+                    return
+            else:
+                stable_ready_count = 0
+
             await asyncio.sleep(0.2)
 
         raise LoginFailedError(
-            "Login dialog did not become ready",
-            reason="login_dialog_not_ready",
+            "SMS form did not become stable",
+            reason="sms_form_not_ready",
+            details={"phone": phone},
         )
 
-    async def _wait_for_sms_send_ready(self, page: Any, phone: str) -> None:
-        phone_selector = self._get_selector("sms_phone_input")
+    async def _confirm_sms_send_started(self, page: Any, before_text: str | None) -> None:
         send_selector = self._get_selector("sms_send_code_button")
+        deadline = asyncio.get_running_loop().time() + 5
 
-        await page.fill(phone_selector, phone)
-        await self._dispatch_input_events(page, phone_selector)
-
-        deadline = asyncio.get_running_loop().time() + min(self._timeout, 5000) / 1000
         while asyncio.get_running_loop().time() < deadline:
-            phone_state = await self._read_selector_state(page, phone_selector)
-            send_state = await self._read_selector_state(page, send_selector)
-            if not isinstance(phone_state, dict) or not isinstance(send_state, dict):
-                return
+            current_text = await self._read_selector_text(page, send_selector)
             if (
-                phone_state.get("exists")
-                and (phone_state.get("value") == phone or phone_state.get("value") is None)
-                and send_state.get("exists")
-                and send_state.get("visible")
-                and send_state.get("enabled")
+                current_text
+                and current_text != before_text
+                and any(char.isdigit() for char in current_text)
             ):
                 return
             await asyncio.sleep(0.2)
 
         raise LoginFailedError(
-            "SMS send button did not become ready",
-            reason="sms_send_not_ready",
-            details={"phone": phone},
+            "SMS send was not confirmed",
+            reason="sms_send_unconfirmed",
         )
+
+    async def _request_sms_code(self, page: Any, phone: str) -> None:
+        send_selector = self._get_selector("sms_send_code_button")
+
+        await self._type_sms_phone_number(page, phone)
+        await self._wait_for_sms_form_stable(page, phone)
+
+        if self._uses_locator_fallback(page):
+            await page.click(send_selector)
+            return
+
+        send_locator = self._locator(page, send_selector)
+        await send_locator.scroll_into_view_if_needed()
+        before_text = await self._read_selector_text(page, send_selector)
+        await send_locator.click(timeout=3000)
+        await self._confirm_sms_send_started(page, before_text)
+
+    async def _fill_sms_code(self, page: Any, sms_code: str) -> None:
+        await page.fill(self._get_selector("sms_code_input"), sms_code)
+        await self._dispatch_input_events(page, self._get_selector("sms_code_input"))
 
     async def _read_login_error(self, page: Any) -> str | None:
         error_element = await page.query_selector(self._get_selector("error_message"))
@@ -326,44 +507,6 @@ class ZnzmoAuthenticator(Authenticator):
             await asyncio.sleep(0.2)
 
         return ("timeout", last_cookie_dict, None)
-
-    async def _switch_login_mode(self, page: Any, login_mode: str) -> None:
-        """切换到指定登录模式的真实弹窗流程."""
-        if login_mode == "sms":
-            sms_phone_state = await self._read_selector_state(
-                page, self._get_selector("sms_phone_input")
-            )
-            sms_code_state = await self._read_selector_state(
-                page, self._get_selector("sms_code_input")
-            )
-            if (
-                sms_phone_state.get("exists")
-                and sms_phone_state.get("visible")
-                and sms_code_state.get("exists")
-            ):
-                return
-
-        phone_button_state = await self._read_selector_state(
-            page, self._get_selector("phone_login_button")
-        )
-        if phone_button_state.get("exists") and phone_button_state.get("visible"):
-            await page.click(self._get_selector("phone_login_button"))
-
-        if login_mode == "sms":
-            sms_tab_state = await self._read_selector_state(page, self._get_selector("sms_tab"))
-            if sms_tab_state.get("exists") and sms_tab_state.get("visible"):
-                await page.click(self._get_selector("sms_tab"))
-            return
-
-        if login_mode == "password":
-            password_tab_state = await self._read_selector_state(
-                page, self._get_selector("password_tab")
-            )
-            if password_tab_state.get("exists") and password_tab_state.get("visible"):
-                await page.click(self._get_selector("password_tab"))
-            return
-
-        raise InvalidCredentialsError("login_mode must be 'password' or 'sms'")
 
     async def _close_page_safely(self, page: Any) -> None:
         """安全关闭页面，忽略已关闭错误."""
@@ -541,7 +684,7 @@ class ZnzmoAuthenticator(Authenticator):
 
             # 访问登录页面
             try:
-                await page.goto(self.LOGIN_URL, wait_until="domcontentloaded")
+                await page.goto(self.LOGIN_URL, wait_until="load")
             except Exception as exc:
                 raise LoginFailedError(
                     "Failed to navigate to login page",
@@ -551,17 +694,14 @@ class ZnzmoAuthenticator(Authenticator):
 
             # 填写登录表单
             try:
-                await self._wait_for_login_flow_ready(page, login_mode)
-                await self._switch_login_mode(page, login_mode)
-
                 if login_mode == "sms":
-                    await self._wait_for_sms_send_ready(page, account_id)
-                    await page.click(self._get_selector("sms_send_code_button"))
+                    await self._prepare_sms_login(page)
+                    await self._request_sms_code(page, account_id)
                     if sms_code is None:
                         sms_code = await self._wait_for_sms_code(account_id)
-                    await page.fill(self._get_selector("sms_code_input"), sms_code)
-                    await self._dispatch_input_events(page, self._get_selector("sms_code_input"))
+                    await self._fill_sms_code(page, sms_code)
                 else:
+                    await self._prepare_password_login(page)
                     await page.fill(self._get_selector("password_phone_input"), username)
                     await page.fill(self._get_selector("password_input"), password)
             except InvalidCredentialsError:

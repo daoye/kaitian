@@ -646,6 +646,42 @@ class TestLoginModes:
             assert session.account_id == "13800138000"
 
     @pytest.mark.asyncio
+    async def test_sms_login_succeeds_when_personal_center_reachable_without_user_indicator(self):
+        """若已能稳定进入 personalCenter，即使 user indicator 延迟，也应判定成功."""
+        authenticator = ZnzmoAuthenticator()
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+
+        with patch.object(authenticator, "_browser_manager") as mock_manager:
+            mock_manager.start = AsyncMock()
+            mock_manager.new_context = AsyncMock(return_value=mock_context)
+            mock_context.new_page = AsyncMock(return_value=mock_page)
+            mock_context.close = AsyncMock()
+
+            mock_page.goto = AsyncMock()
+            mock_page.fill = AsyncMock()
+            mock_page.click = AsyncMock()
+            mock_page.wait_for_load_state = AsyncMock()
+            mock_page.evaluate = AsyncMock(return_value="Mozilla/5.0")
+            mock_page.close = AsyncMock()
+            mock_page.url = "https://www.znzmo.com/personalCenter"
+
+            mock_page.query_selector = AsyncMock(return_value=None)
+            mock_context.cookies = AsyncMock(
+                return_value=[{"name": "session_id", "value": "sms123", "domain": ".znzmo.com"}]
+            )
+
+            session = await authenticator.login(
+                {
+                    "login_mode": "sms",
+                    "phone": "13800138000",
+                    "sms_code": "123456",
+                }
+            )
+
+            assert session.account_id == "13800138000"
+
+    @pytest.mark.asyncio
     async def test_password_login_no_regression(self):
         """密码登录流程应走真实弹窗：手机入口 -> 密码 tab -> 手机号/密码 -> 提交."""
         authenticator = ZnzmoAuthenticator()
