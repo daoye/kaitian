@@ -1,4 +1,9 @@
 from .__version__ import __version__
+from .challenges import (
+    BrowserChallenge,
+    apply_browser_challenge_token,
+    detect_browser_challenge,
+)
 from .core import BrowserManager, ManagedBrowserContext
 from .exceptions import (
     BrowserContextError,
@@ -15,6 +20,9 @@ __all__ = [
     "__version__",
     "BrowserManager",
     "ManagedBrowserContext",
+    "BrowserChallenge",
+    "apply_browser_challenge_token",
+    "detect_browser_challenge",
     "BrowserLaunchOptions",
     "BrowserContextOptions",
     "Cookie",

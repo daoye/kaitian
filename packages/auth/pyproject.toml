@@ -8,6 +8,7 @@ dependencies = [
     "core",
     "browser",
     "stealth",
+    "captcha",
 ]
 
 [build-system]

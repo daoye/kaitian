@@ -315,12 +315,12 @@ max_challenge_per_session = 3
 
 ## 15. 外部参考（调研依据）
 
-1. Playwright 官方 BrowserContext 文档（storage_state、cookies、context 配置）。
+1. rebrowser-playwright / Playwright BrowserContext 文档（storage_state、cookies、context 配置）。
 2. `playwright-stealth` 项目文档（可选能力参考，不强耦合）。
 3. Browserless 2026 实践总结（强调信号一致性、渐进式升级）。
 4. Cloudflare/验证码处理公开资料（用于挑战识别与恢复策略边界）。
 
-注：外部资料仅作为工程参考，项目实现以可维护性、合规性和可观测性为第一优先。
+注：外部资料仅作为工程参考，项目实现以可维护性、合规性和可观测性为第一优先。当前浏览器运行时主路径为 `rebrowser-playwright + chromium`。
 
 ## 16. 关键工程约束（必须遵守）
 
@@ -328,6 +328,12 @@ max_challenge_per_session = 3
 2. 依赖方向固定：`browser -> stealth/captcha`，`captcha` 不反向依赖 `browser`。
 3. 不引入依赖注入容器，保持显式构造与直接依赖。
 4. 先指标后优化：没有指标不允许升级策略复杂度。
+
+## 17. 当前诊断结论（2026-03-22）
+
+基于 `3dbrute.com` 真实链路复测与代码审计，当前反检测实现存在“过度激活导致异常指纹组合”的风险，属于实现不准确而非手段不足。关键证据：`packages/auth/src/auth/sites/three_dbrute/authenticator.py` 当前使用 `enabled_patches=get_available_patches()` 且 `risk_limit="high"`，导致 `packages/stealth/src/stealth/types.py` 中默认禁用的高风险补丁也被启用；运行态采样显示 `effective_patches=21`（含 `iframe_content_window`、`media_codecs`），但仍落在 Cloudflare `Just a moment...` interstitial。
+
+当前应执行“先减害后增强”的修复顺序：第一，撤销 `three_dbrute` 的全量补丁与高风险策略，回到默认稳健补丁集（`default_enabled + medium`）；第二，保留并继续使用非无头人工介入等待链路（挑战后等待页面稳定并再次检测）；第三，补齐运行时可观测数据（effective_patches、challenge 类型迁移、页面稳定阶段 URL 变化）后再做逐项白名单试验，禁止再次一次性全开高风险补丁。
 
 ---
 

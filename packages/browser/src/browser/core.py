@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import logging
 from collections.abc import Iterable
 from typing import Any
@@ -19,6 +20,20 @@ from .retry import retry
 from .types import BrowserContextOptions, BrowserLaunchOptions, Cookie, RouteRule
 
 logger = logging.getLogger("browser")
+
+
+def _resolve_system_chrome_path() -> str | None:
+    for candidate in (
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "chrome",
+    ):
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return None
 
 
 class ManagedBrowserContext:
@@ -52,8 +67,6 @@ class ManagedBrowserContext:
 
     async def new_page(self) -> Any:
         try:
-            import asyncio
-
             return await asyncio.wait_for(
                 self._context.new_page(),
                 timeout=self._options.page_creation_timeout_ms / 1000,
@@ -148,12 +161,30 @@ class BrowserManager:
             runner = factory()
             self._playwright = await runner.start()
             engine = getattr(self._playwright, self._launch_options.engine)
+            args = self._launch_options.launch_args.copy()
+            if self._launch_options.enable_cdc:
+                args.append("--auto-open-devtools-for-tabs")
+            if self._launch_options.cdp_port is not None:
+                args.append(f"--remote-debugging-port={self._launch_options.cdp_port}")
+            else:
+                # 如果启用 CDC 但没有指定端口，使用默认端口 9222
+                if self._launch_options.enable_cdc:
+                    args.append("--remote-debugging-port=9222")
+            launch_kwargs = {
+                "headless": self._launch_options.headless,
+                "slow_mo": self._launch_options.slow_mo_ms,
+                "proxy": self._launch_options.proxy,
+                "args": args,
+                "timeout": self._launch_options.timeout_ms,
+            }
+            if self._launch_options.engine == "chromium":
+                system_chrome = _resolve_system_chrome_path()
+                if system_chrome is not None:
+                    launch_kwargs["executable_path"] = system_chrome
+                else:
+                    launch_kwargs["channel"] = "chrome"
             self._browser = await engine.launch(
-                headless=self._launch_options.headless,
-                slow_mo=self._launch_options.slow_mo_ms,
-                proxy=self._launch_options.proxy,
-                args=self._launch_options.launch_args,
-                timeout=self._launch_options.timeout_ms,
+                **launch_kwargs,
             )
             self._started = True
             logger.info(
@@ -224,6 +255,8 @@ class BrowserManager:
                 "base_url": context_options.base_url,
             },
         )
+        if self._browser is None:
+            raise BrowserLaunchError("browser is not available after startup")
         try:
             raw_context = await self._browser.new_context(
                 base_url=context_options.base_url,

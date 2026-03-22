@@ -9,7 +9,7 @@ kaitian/
 ├── packages/           # 原子模块
 │   ├── core/          # 核心抽象层
 │   ├── auth/          # 认证与会话管理
-│   ├── browser/       # Playwright 浏览器封装
+│   ├── browser/       # rebrowser-playwright 浏览器封装
 │   ├── stealth/       # 反检测/反反爬虫
 │   ├── captcha/       # 验证码处理
 │   ├── downloader/    # 资源下载
@@ -44,6 +44,14 @@ uv run kaitian --help
 uv run kaitian hello world
 ```
 
+### 浏览器前置条件
+
+主路径使用 `rebrowser-playwright + 系统 Chrome`。
+
+```bash
+google-chrome-stable --version
+```
+
 ### 启动 API
 
 ```bash
@@ -61,7 +69,7 @@ uv run uvicorn api.main:app --reload
 
 - Python 3.12+
 - uv (依赖管理)
-- Playwright (浏览器自动化)
+- rebrowser-playwright (Chromium 浏览器自动化)
 - FastAPI (API 服务)
 - SQLite (数据存储)
 

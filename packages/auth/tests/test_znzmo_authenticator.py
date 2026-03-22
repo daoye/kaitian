@@ -382,9 +382,7 @@ class TestLoginModes:
 
             await authenticator.login({"username": "test_user", "password": "test_pass"})
 
-            mock_page.goto.assert_called_once_with(
-                "https://www.znzmo.com/register.html", wait_until="domcontentloaded"
-            )
+            mock_page.goto.assert_called_once_with(ZnzmoAuthenticator.LOGIN_URL, wait_until="load")
 
     @pytest.mark.asyncio
     async def test_sms_login_success_path(self):

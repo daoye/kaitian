@@ -38,6 +38,8 @@ class BrowserConfig(BaseSettings):
     proxy_username: Optional[str] = Field(default=None, description="浏览器代理用户名")
     proxy_password: Optional[str] = Field(default=None, description="浏览器代理密码")
     proxy_bypass: Optional[str] = Field(default=None, description="浏览器代理绕过地址")
+    enable_cdc: bool = Field(default=False, description="是否启用 CDC")
+    cdp_port: Optional[int] = Field(default=None, description="CDP 端口")
 
     @field_validator("user_data_dir")
     @classmethod
@@ -48,6 +50,14 @@ class BrowserConfig(BaseSettings):
         return v.expanduser().resolve()
 
     model_config = SettingsConfigDict(env_prefix="KAITIAN_BROWSER_")
+
+
+class StealthConfig(BaseSettings):
+    """Stealth 配置"""
+
+    enabled: bool = Field(default=False, description="是否启用 Stealth")
+
+    model_config = SettingsConfigDict(env_prefix="KAITIAN_STEALTH_")
 
 
 class DownloadConfig(BaseSettings):
@@ -134,6 +144,7 @@ class CoreConfig(BaseSettings):
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     log: LogConfig = Field(default_factory=LogConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    stealth: StealthConfig = Field(default_factory=StealthConfig)
 
     model_config = SettingsConfigDict(
         env_prefix="KAITIAN_",

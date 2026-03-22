@@ -46,7 +46,7 @@ kaitian/                      # 根项目（workspace root）
 ├── packages/                 # 可独立发布的原子模块
 │   ├── core/         # 核心抽象层
 │   ├── auth/         # 账号与会话管理
-│   ├── browser/      # Playwright 浏览器封装
+│   ├── browser/      # rebrowser-playwright 浏览器封装
 │   ├── stealth/      # 反检测/反反爬虫
 │   ├── captcha/      # 验证码识别与处理
 │   ├── discovery/    # 资源发现与监控

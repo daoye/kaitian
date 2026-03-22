@@ -3,8 +3,8 @@
 提供统一的验证码挑战与求解接口，支持人工介入和扩展能力。
 """
 
+from dataclasses import dataclass, field
 from typing import Optional, Protocol
-from dataclasses import dataclass
 
 
 class CaptchaOutcome:
@@ -27,6 +27,13 @@ class CaptchaOutcome:
     STATUS_FAILED = "failed"
     STATUS_NOT_PRESENT = "not_present"
 
+    @property
+    def token(self) -> str | None:
+        value = self.data.get("token")
+        if isinstance(value, str) and value:
+            return value
+        return None
+
 
 @dataclass
 class CaptchaChallenge:
@@ -37,9 +44,16 @@ class CaptchaChallenge:
 
     site: str
     challenge_type: str
-    image_bytes: bytes
     page_url: str
-    metadata: dict
+    image_bytes: bytes = b""
+    metadata: dict = field(default_factory=dict)
+    provider: str | None = None
+    site_key: str | None = None
+    response_field: str | None = None
+    widget_selector: str | None = None
+    action: str | None = None
+    callback: str | None = None
+    invisible: bool = False
 
     def to_dict(self) -> dict:
         """转换为字典，便于日志和调试."""
@@ -48,6 +62,10 @@ class CaptchaChallenge:
             "challenge_type": self.challenge_type,
             "page_url": self.page_url,
             "has_image": len(self.image_bytes) > 0,
+            "provider": self.provider,
+            "site_key": self.site_key,
+            "response_field": self.response_field,
+            "action": self.action,
         }
 
 

@@ -1,6 +1,6 @@
 # browser
 
-KaiTian browser 模块 - 生产级浏览器自动化管理。
+KaiTian browser 模块 - 基于 rebrowser-playwright 的生产级浏览器自动化管理。
 
 ## 安装
 
@@ -11,12 +11,15 @@ pip install -e .
 ### 系统依赖
 
 - Python 3.12+
-- Playwright 1.40+
-- 浏览器二进制（Chromium/Firefox/WebKit）
+- rebrowser-playwright 1.52+
+- 系统 Chrome（优先使用系统已安装的 Google Chrome / Chrome Stable）
+
+
+rebrowser-playwright 是 Playwright 的兼容发行版，当前项目保留 `playwright.*` API 不变，但默认在 `chromium` 引擎上优先启动系统 Chrome。
 
 ```bash
-# 安装 Playwright 浏览器
-playwright install chromium
+# Debian / Ubuntu 示例
+google-chrome-stable --version
 ```
 
 ## 快速开始
@@ -41,6 +44,41 @@ async with manager:
     # 获取页面内容
     content = await page.content()
 ```
+
+## CLI 使用
+
+KaiTian CLI 支持通过命令行控制 CDP 模式：
+
+```bash
+# 启用 CDP，使用默认端口
+uv run kaitian auth login --site znzmo --account test --enable-cdc --no-headless
+
+# 启用 CDP，指定端口
+uv run kaitian auth login --site znzmo --account test --enable-cdc --cdp-port 9223 --no-headless
+
+# 禁用 CDP（默认）
+uv run kaitian auth login --site znzmo --account test --disable-cdc
+```
+
+**CLI 参数说明**：
+
+- `--enable-cdc` / `--disable-cdc`：控制是否启用 Chrome DevTools Protocol
+- `--cdp-port`：指定 CDP 端口（可选，默认 9222）
+- `--headless` / `--no-headless`：控制是否无头模式（CDP 模式通常需要 `--no-headless`）
+
+**连接到 CDP**：
+
+启用 CDP 后，可以使用 Chrome DevTools 连接：
+
+1. 打开 Chrome DevTools：在浏览器地址栏输入 `chrome://inspect`
+2. 或者直接访问：`http://localhost:9222/json`
+3. 点击对应的会话进行调试
+
+**运行时兼容性**：
+
+- `rebrowser-playwright` 仅替换浏览器运行时分发包，`playwright.*` API 保持不变
+- `BrowserManager` 仍然使用 `playwright.async_api` 导入方式，无需额外适配代码
+- `BrowserManager` 在 `chromium` 模式下默认优先启动系统 Chrome，不走 Playwright 自带浏览器
 
 ## 核心 API
 
@@ -132,9 +170,35 @@ class BrowserLaunchOptions:
     headless: bool = True                    # 是否无头模式
     timeout_ms: int = 30000                  # 启动超时（毫秒）
     slow_mo_ms: int = 0                      # 慢速模式（毫秒）
+    enable_cdc: bool = False                 # 是否启用 Chrome DevTools Protocol
+    cdp_port: int | None = None              # Chrome DevTools Protocol 端口（默认 9222）
     launch_args: list[str] = []              # 额外启动参数
     proxy: dict[str, str] | None = None      # 代理配置
 ```
+
+**Chrome DevTools Protocol (CDP) 模式**
+
+启用 CDP 模式后，浏览器将开启远程调试端口，允许外部工具（如 Chrome DevTools、Puppeteer）连接。
+
+```python
+# 启用 CDP，使用默认端口 9222
+launch_options = BrowserLaunchOptions(
+    enable_cdc=True,
+    headless=False,  # CDP 模式通常需要非无头模式
+)
+
+# 启用 CDP，指定端口
+launch_options = BrowserLaunchOptions(
+    enable_cdc=True,
+    cdp_port=9223,
+    headless=False,
+)
+```
+
+**使用场景**：
+- 开发调试：使用 Chrome DevTools 连接到浏览器
+- 自动化测试：使用 CDP 协议进行高级控制
+- 性能分析：监控浏览器性能指标
 
 #### BrowserContextOptions
 
@@ -420,7 +484,7 @@ async with BrowserManager() as manager:
 
 - **Python**: 3.12+
 - **Playwright**: 1.40+
-- **浏览器**: Chromium/Firefox/WebKit（通过 `playwright install` 安装）
+- **浏览器**: Chromium（优先使用系统 Chrome）/Firefox/WebKit（仅保留原始接口）
 - **系统**: Linux/macOS/Windows，推荐 Linux 服务器
 - **内存**: 至少 2GB RAM（每个浏览器实例约 100-300MB）
 - **磁盘**: 至少 1GB 可用空间（浏览器二进制 + 缓存）
@@ -458,8 +522,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# 安装 Playwright 浏览器
-RUN playwright install chromium
+# 确保镜像内已有系统 Chrome
+RUN google-chrome-stable --version
 
 # 复制应用代码
 COPY . /app
@@ -490,7 +554,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e packages/browser
-          playwright install chromium
+          google-chrome-stable --version
 
       - name: Run tests
         run: uv run pytest packages/browser/tests -v
@@ -504,10 +568,10 @@ jobs:
 
 **常见原因与解决**:
 
-1. **浏览器未安装**
+1. **系统 Chrome 不可用**
    ```bash
    # 检查
-   playwright install chromium
+   google-chrome-stable --version
    ```
 
 2. **系统依赖缺失**（Linux）

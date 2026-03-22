@@ -1,8 +1,24 @@
 # stealth
 
-KaiTian 反检测/反反爬虫模块。
+KaiTian 反检测/反反爬虫模块，默认运行在 `rebrowser-playwright + chromium` 主路径上。
 
 ## 功能特性
+
+### 反检测引擎选择
+
+KaiTian stealth 模块支持两种反检测引擎：
+
+1. **playwright-stealth 库**（默认反检测层）
+   - 基于 [playwright-stealth](https://github.com/Mattwmaster58/playwright_stealth) 开源库
+   - 自动化特征隐藏、WebGL 指纹修改、Canvas 噪声等
+   - 持续维护，社区支持良好
+   - 适合作为 rebrowser Chromium 运行时上的补充反检测层
+
+2. **自定义脚本**（可选）
+   - KaiTian 自有的 JavaScript 补丁系统
+   - 支持精细化控制每个补丁
+   - 站点特定策略支持
+   - 适合需要高度定制的场景
 
 ### P0 基线能力（已实现）
 
@@ -49,12 +65,24 @@ click_delay = manager.get_random_delay("click")
 ```python
 from stealth import StealthConfig, StealthProfile
 
-# 使用预设模板
+# 使用预设模板（默认启用 playwright-stealth）
 config = StealthConfig(
     enabled=True,
+    use_playwright_stealth=True,  # 使用 playwright-stealth 库（默认）
+    use_custom_scripts=False,      # 不使用自定义脚本（默认）
     fingerprint_preset="chrome_windows",  # 可选: chrome_windows, safari_mac, firefox_windows, mobile_android 等
     human_like=True,
     noise_level="medium",  # 可选: low, medium, high
+)
+
+# 使用自定义脚本（禁用 playwright-stealth）
+config = StealthConfig(
+    enabled=True,
+    use_playwright_stealth=False,  # 不使用 playwright-stealth
+    use_custom_scripts=True,        # 启用自定义脚本
+    fingerprint_preset="chrome_windows",
+    human_like=True,
+    noise_level="medium",
 )
 
 # 自定义指纹画像
@@ -213,4 +241,3 @@ uv run pytest packages/stealth/tests --cov=stealth --cov-report=html
 ## License
 
 MIT
-
