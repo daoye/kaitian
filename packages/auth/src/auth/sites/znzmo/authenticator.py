@@ -14,7 +14,7 @@ import asyncio
 import inspect
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, cast
 from unittest.mock import AsyncMock, Mock
 
 from browser import BrowserManager, BrowserLaunchOptions
@@ -34,6 +34,7 @@ from auth.verification import (
     VerificationCodeChallenge,
     VerificationCodeProvider,
 )
+from core.wait import PollTimeoutError, poll_until
 
 logger = logging.getLogger("auth.znzmo")
 
@@ -67,7 +68,7 @@ class ZnzmoAuthenticator(Authenticator):
 
     # 知末网相关配置
     BASE_URL = "https://www.znzmo.com"
-    LOGIN_URL = "https://www.znzmo.com/register.html"
+    LOGIN_URL = "https://www.znzmo.com/?from=personalCenter"
     USER_CENTER_URL = "https://www.znzmo.com/personalCenter"
 
     # 默认页面选择器
@@ -227,29 +228,22 @@ class ZnzmoAuthenticator(Authenticator):
         reason: str,
         timeout_ms: int | None = None,
     ) -> None:
-        deadline = (
-            asyncio.get_running_loop().time() + (timeout_ms or min(self._timeout, 8000)) / 1000
-        )
-        stable_ready_count = 0
+        """等待所有选择器都变为可见."""
 
-        while asyncio.get_running_loop().time() < deadline:
-            all_visible = True
+        async def check_all_visible() -> bool | None:
+            """检查所有选择器是否都可见。"""
             for selector in selectors:
                 state = await self._read_selector_state(page, selector)
                 if not (state.get("exists") and state.get("visible")):
-                    all_visible = False
-                    break
+                    return None
+            return True
 
-            if all_visible:
-                stable_ready_count += 1
-                if stable_ready_count >= 3:
-                    return
-            else:
-                stable_ready_count = 0
+        timeout_s = (timeout_ms or min(self._timeout, 8000)) / 1000
 
-            await asyncio.sleep(0.2)
-
-        raise LoginFailedError("Login dialog did not become ready", reason=reason)
+        try:
+            await poll_until(check_all_visible, timeout=timeout_s, interval=0.2)
+        except PollTimeoutError:
+            raise LoginFailedError("Login dialog did not become ready", reason=reason)
 
     async def _prepare_sms_login(self, page: Any) -> None:
         await self._wait_for_visible_selectors(
@@ -339,14 +333,15 @@ class ZnzmoAuthenticator(Authenticator):
         await self._dispatch_input_events(page, phone_selector)
 
     async def _wait_for_sms_form_stable(self, page: Any, phone: str) -> None:
+        """等待短信表单稳定。"""
         phone_selector = self._get_selector("sms_phone_input")
-        deadline = asyncio.get_running_loop().time() + min(self._timeout, 5000) / 1000
-        stable_ready_count = 0
+        timeout_s = min(self._timeout, 5000) / 1000
 
-        while asyncio.get_running_loop().time() < deadline:
+        async def check_form_stable() -> bool | None:
+            """检查表单状态是否稳定。"""
             phone_state = await self._read_selector_state(page, phone_selector)
             if not isinstance(phone_state, dict):
-                return
+                return True
 
             phone_value = phone_state.get("value")
             phone_ready = phone_value == phone
@@ -360,39 +355,40 @@ class ZnzmoAuthenticator(Authenticator):
                 and phone_ready
             )
             if ready:
-                stable_ready_count += 1
-                if stable_ready_count >= 4:
-                    await asyncio.sleep(0.4)
-                    return
-            else:
-                stable_ready_count = 0
+                return True
+            return None
 
-            await asyncio.sleep(0.2)
-
-        raise LoginFailedError(
-            "SMS form did not become stable",
-            reason="sms_form_not_ready",
-            details={"phone": phone},
-        )
+        try:
+            await poll_until(check_form_stable, timeout=timeout_s, interval=0.2)
+        except PollTimeoutError:
+            raise LoginFailedError(
+                "SMS form did not become stable",
+                reason="sms_form_not_ready",
+                details={"phone": phone},
+            )
 
     async def _confirm_sms_send_started(self, page: Any, before_text: str | None) -> None:
+        """确认验证码发送已开始。"""
         send_selector = self._get_selector("sms_send_code_button")
-        deadline = asyncio.get_running_loop().time() + 5
 
-        while asyncio.get_running_loop().time() < deadline:
+        async def check_text_changed() -> bool | None:
+            """检查按钮文本是否已改变。"""
             current_text = await self._read_selector_text(page, send_selector)
             if (
                 current_text
                 and current_text != before_text
                 and any(char.isdigit() for char in current_text)
             ):
-                return
-            await asyncio.sleep(0.2)
+                return True
+            return None
 
-        raise LoginFailedError(
-            "SMS send was not confirmed",
-            reason="sms_send_unconfirmed",
-        )
+        try:
+            await poll_until(check_text_changed, timeout=5.0, interval=0.2)
+        except PollTimeoutError:
+            raise LoginFailedError(
+                "SMS send was not confirmed",
+                reason="sms_send_unconfirmed",
+            )
 
     async def _request_sms_code(self, page: Any, phone: str) -> None:
         send_selector = self._get_selector("sms_send_code_button")
@@ -466,47 +462,51 @@ class ZnzmoAuthenticator(Authenticator):
         context: Any,
         login_mode: str,
     ) -> tuple[str, dict[str, str], str | None]:
-        deadline = asyncio.get_running_loop().time() + self._timeout / 1000
+        """等待登录结果。"""
+        timeout_s = self._timeout / 1000
         last_cookie_dict: dict[str, str] = {}
 
-        while asyncio.get_running_loop().time() < deadline:
-            try:
-                error_text = await self._read_login_error(page)
-            except Exception as exc:
-                if self._is_transient_navigation_error(exc):
-                    await asyncio.sleep(0.2)
-                    continue
-                raise
+        def is_transient_navigation_error(exc: Exception) -> bool:
+            """判断是否为瞬态导航错误。"""
+            return self._is_transient_navigation_error(exc)
+
+        async def check_outcome() -> tuple[str, dict[str, str], str | None] | None:
+            """检查登录结果。"""
+            nonlocal last_cookie_dict  # 声明使用外层变量
+
+            # 检查错误信息
+            error_text = await self._read_login_error(page)
             if error_text is not None:
                 return ("error", last_cookie_dict, error_text)
 
-            try:
-                has_user_indicator = await self._has_user_indicator(page)
-            except Exception as exc:
-                if self._is_transient_navigation_error(exc):
-                    await asyncio.sleep(0.2)
-                    continue
-                raise
-
+            # 检查用户标识
+            has_user_indicator = await self._has_user_indicator(page)
             if has_user_indicator:
                 return ("success", await self._extract_cookie_dict(context), None)
 
+            # 检查 cookie 和弹窗状态
             cookie_dict = await self._extract_cookie_dict(context)
             if cookie_dict:
                 last_cookie_dict = cookie_dict
-                try:
-                    login_modal_visible = await self._is_login_modal_visible(page, login_mode)
-                except Exception as exc:
-                    if self._is_transient_navigation_error(exc):
-                        await asyncio.sleep(0.2)
-                        continue
-                    raise
+                login_modal_visible = await self._is_login_modal_visible(page, login_mode)
                 if not login_modal_visible:
                     return ("success", cookie_dict, None)
 
-            await asyncio.sleep(0.2)
+            return None
 
-        return ("timeout", last_cookie_dict, None)
+        try:
+            outcome = cast(
+                tuple[str, dict[str, str], str | None],
+                await poll_until(
+                    check_outcome,
+                    timeout=timeout_s,
+                    interval=0.2,
+                    retry_on_exception=is_transient_navigation_error,
+                ),
+            )
+            return outcome
+        except PollTimeoutError:
+            return ("timeout", last_cookie_dict, None)
 
     async def _close_page_safely(self, page: Any) -> None:
         """安全关闭页面，忽略已关闭错误."""

@@ -3,9 +3,35 @@
 import pytest
 import tempfile
 import os
+from datetime import datetime, timedelta
 
 from auth import AuthManager, SessionRepository
 from auth.exceptions import SessionNotFoundError, SiteNotSupportedError
+
+
+class DummyPage:
+    def __init__(self) -> None:
+        self.goto_calls: list[str] = []
+
+    async def goto(self, url: str) -> None:
+        self.goto_calls.append(url)
+
+    async def wait_for_event(self, name: str) -> None:
+        return None
+
+
+class DummyBrowserManager:
+    def __init__(self) -> None:
+        self.applied_session = None
+        self.applied_base_url = None
+        self.page = DummyPage()
+
+    async def apply_session(self, session, base_url=None) -> None:
+        self.applied_session = session
+        self.applied_base_url = base_url
+
+    async def new_page(self):
+        return self.page
 
 
 class TestSessionRepository:
@@ -73,6 +99,16 @@ class TestSessionRepository:
         sessions = repo.list_by_site("znzmo")
         assert len(sessions) == 3
 
+    def test_list_all(self, repo):
+        """测试列出所有会话."""
+        from core.models import Session
+
+        repo.save(Session(session_id="test-a", site="znzmo", account_id="user-a"))
+        repo.save(Session(session_id="test-b", site="other", account_id="user-b"))
+
+        sessions = repo.list_all()
+        assert len(sessions) == 2
+
 
 class TestAuthManager:
     """测试 AuthManager."""
@@ -102,6 +138,32 @@ class TestAuthManager:
         session = manager.get_session("znzmo", "nonexistent")
         assert session is None
 
+    def test_get_session_by_id(self, manager):
+        """测试通过 session_id 获取会话."""
+        from core.models import Session
+
+        session = Session(session_id="session-001", site="znzmo", account_id="tester")
+        manager._repository.save(session)
+
+        retrieved = manager.get_session_by_id("session-001")
+        assert retrieved is not None
+        assert retrieved.session_id == "session-001"
+        assert retrieved.account_id == "tester"
+
+    def test_get_session_by_id_expired_returns_none(self, manager):
+        """测试过期 session_id 查询返回 None."""
+        from core.models import Session
+
+        session = Session(
+            session_id="session-expired",
+            site="znzmo",
+            account_id="tester",
+            expires_at=datetime.now() - timedelta(minutes=1),
+        )
+        manager._repository.save(session)
+
+        assert manager.get_session_by_id("session-expired") is None
+
     def test_login_unsupported_site(self, manager):
         """测试不支持的站点."""
         import asyncio
@@ -116,3 +178,43 @@ class TestAuthManager:
         # 应该返回 True（幂等）
         result = asyncio.run(manager.logout("znzmo", "nonexistent"))
         assert result is True
+
+    def test_open_site_uses_session(self, manager):
+        """测试使用指定会话打开目标网站."""
+        import asyncio
+        from core.models import Session
+
+        session = Session(session_id="session-open", site="znzmo", account_id="tester")
+        manager._repository.save(session)
+        browser_manager = DummyBrowserManager()
+
+        page = asyncio.run(
+            manager.open_site("session-open", "https://example.com", browser_manager)
+        )
+
+        assert browser_manager.applied_session is not None
+        assert browser_manager.applied_session.session_id == "session-open"
+        assert browser_manager.applied_base_url == "https://example.com"
+        assert browser_manager.page.goto_calls == ["https://example.com"]
+        assert page is browser_manager.page
+
+    def test_open_site_missing_session_raises(self, manager):
+        """测试缺失会话时打开网站失败."""
+        import asyncio
+
+        browser_manager = DummyBrowserManager()
+
+        with pytest.raises(SessionNotFoundError):
+            asyncio.run(
+                manager.open_site("missing-session", "https://example.com", browser_manager)
+            )
+
+    def test_list_sessions_all_sites(self, manager):
+        """测试不指定站点时列出所有会话."""
+        from core.models import Session
+
+        manager._repository.save(Session(session_id="session-a", site="znzmo", account_id="a"))
+        manager._repository.save(Session(session_id="session-b", site="other", account_id="b"))
+
+        sessions = manager.list_sessions()
+        assert len(sessions) == 2

@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, Optional
 
+from browser import BrowserManager
 from core.models import Authenticator, Session
 from .exceptions import AuthError, SessionNotFoundError, SiteNotSupportedError
 from .repository import SessionRepository
@@ -58,6 +59,13 @@ class AuthManager:
             会话对象，不存在或已过期返回 None
         """
         session = self._repository.get_by_account(site, account_id)
+        if session and session.is_expired():
+            return None
+        return session
+
+    def get_session_by_id(self, session_id: str) -> Optional[Session]:
+        """通过会话 ID 获取会话（自动检查过期）."""
+        session = self._repository.get_by_session_id(session_id)
         if session and session.is_expired():
             return None
         return session
@@ -130,6 +138,19 @@ class AuthManager:
 
         return self._repository.delete(session.session_id)
 
-    def list_sessions(self, site: str) -> list:
-        """列出站点的所有会话."""
+    def list_sessions(self, site: str | None = None) -> list[Session]:
+        """列出会话，可按站点过滤."""
+        if site is None:
+            return self._repository.list_all()
         return self._repository.list_by_site(site)
+
+    async def open_site(self, session_id: str, url: str, browser_manager: BrowserManager) -> Any:
+        """使用指定会话打开目标网站."""
+        session = self.get_session_by_id(session_id)
+        if not session:
+            raise SessionNotFoundError(f"Session not found: {session_id}")
+
+        await browser_manager.apply_session(session, base_url=url)
+        page = await browser_manager.new_page()
+        await page.goto(url)
+        return page

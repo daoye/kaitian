@@ -59,19 +59,35 @@ from .models import (
     PublishResult,
 )
 
+# 核心数据模型和接口
+from .models import (
+    Authenticator,
+    BrowserContext,
+    Downloader,
+    Publisher,
+    Resource,
+    Session,
+    SessionGroup,
+    Storage,
+    Validator,
+    ValidationResult,
+    PublishResult,
+)
+
+# 轮询等待辅助函数
+from .wait import PollTimeoutError, poll_until
+
 # 公共 API
 __all__ = [
     # 版本信息
     "__version__",
     "__author__",
     "__email__",
-    
     # 类型定义
     "LogLevel",
-    "PublishTarget", 
+    "PublishTarget",
     "ResourceStatus",
     "ValidationLevel",
-    
     # 异常定义
     "KaitianError",
     "ConfigError",
@@ -86,7 +102,6 @@ __all__ = [
     "TimeoutError",
     "NetworkError",
     "StorageError",
-    
     # 配置管理
     "CoreConfig",
     "DatabaseConfig",
@@ -96,14 +111,12 @@ __all__ = [
     "SecurityConfig",
     "ConfigManager",
     "get_config",
-    
     # 核心数据模型
     "Resource",
     "Session",
     "SessionGroup",
     "ValidationResult",
     "PublishResult",
-    
     # 抽象接口
     "Authenticator",
     "Downloader",
@@ -111,4 +124,7 @@ __all__ = [
     "Publisher",
     "BrowserContext",
     "Storage",
+    # 轮询等待
+    "PollTimeoutError",
+    "poll_until",
 ]

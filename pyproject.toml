@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "模块化自动化采集与搬运工具集"
 readme = "README.md"
 requires-python = ">=3.12"
+dependencies = [
+    "cli",
+]
 license = { text = "MIT" }
 authors = [
     { name = "KaiTian Team" }

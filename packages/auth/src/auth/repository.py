@@ -128,6 +128,15 @@ class SessionRepository:
         except sqlite3.Error as e:
             raise SessionStorageError(f"Failed to list sessions: {e}")
 
+    def list_all(self) -> List[Session]:
+        """列出所有会话."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("SELECT * FROM sessions ORDER BY updated_at DESC")
+                return [self._row_to_session(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            raise SessionStorageError(f"Failed to list sessions: {e}")
+
     def purge_expired(self) -> int:
         """清理过期会话，返回删除数量."""
         try:

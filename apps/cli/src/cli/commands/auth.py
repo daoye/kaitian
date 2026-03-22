@@ -2,10 +2,12 @@ import asyncio
 from pathlib import Path
 
 import typer
+from browser import BrowserLaunchOptions, BrowserManager
+from browser.exceptions import BrowserError
 from rich.console import Console
 
 from auth import AuthManager, SessionRepository, ZnzmoAuthenticator
-from auth.exceptions import AuthError, SiteNotSupportedError
+from auth.exceptions import AuthError, SessionNotFoundError, SiteNotSupportedError
 from core import get_config
 
 router = typer.Typer(help="认证与会话管理")
@@ -27,6 +29,10 @@ def _create_auth_manager(db_path: Path, headless: bool | None = None) -> AuthMan
     effective_headless = _default_headless() if headless is None else headless
     manager.register_authenticator("znzmo", ZnzmoAuthenticator(headless=effective_headless))
     return manager
+
+
+def _create_browser_manager(headless: bool) -> BrowserManager:
+    return BrowserManager(BrowserLaunchOptions(headless=headless))
 
 
 def _exit_with_error(message: str, code: int) -> None:
@@ -92,6 +98,29 @@ def verify(
     typer.echo(f"会话有效: {site}/{account}")
 
 
+@router.command("refresh")
+def refresh(
+    site: str = typer.Option(..., "--site"),
+    account: str = typer.Option(..., "--account"),
+    db_path: Path = typer.Option(_default_auth_db_path(), "--db-path"),
+) -> None:
+    manager = _create_auth_manager(db_path)
+    try:
+        session = asyncio.run(manager.refresh(site, account))
+    except SiteNotSupportedError as exc:
+        _exit_with_error(f"站点不支持: {exc}", 11)
+    except SessionNotFoundError as exc:
+        _exit_with_error(f"会话不存在: {exc}", 10)
+    except AuthError as exc:
+        _exit_with_error(f"认证失败: {exc}", 10)
+    except Exception as exc:
+        _exit_with_error(f"未知错误: {exc}", 99)
+
+    if session is None:
+        _exit_with_error(f"刷新失败: {site}/{account}", 10)
+    typer.echo(f"刷新成功: {session.site}/{session.account_id} session_id={session.session_id}")
+
+
 @router.command("logout")
 def logout(
     site: str = typer.Option(..., "--site"),
@@ -111,3 +140,63 @@ def logout(
     if not result:
         _exit_with_error(f"登出失败: {site}/{account}", 10)
     typer.echo(f"登出成功: {site}/{account}")
+
+
+@router.command("list")
+def list_sessions(
+    site: str | None = typer.Option(None, "--site"),
+    db_path: Path = typer.Option(_default_auth_db_path(), "--db-path"),
+) -> None:
+    manager = _create_auth_manager(db_path)
+    try:
+        sessions = manager.list_sessions(site)
+    except AuthError as exc:
+        _exit_with_error(f"认证失败: {exc}", 10)
+    except Exception as exc:
+        _exit_with_error(f"未知错误: {exc}", 99)
+
+    if not sessions:
+        if site is None:
+            typer.echo("未找到会话")
+        else:
+            typer.echo(f"未找到会话: {site}")
+        return
+
+    for session in sessions:
+        expires_at = session.expires_at.isoformat() if session.expires_at else "never"
+        typer.echo(
+            f"session_id={session.session_id} site={session.site} account={session.account_id} expires_at={expires_at}"
+        )
+
+
+@router.command("open")
+def open_site(
+    session_id: str = typer.Option(..., "--session-id"),
+    url: str = typer.Option(..., "--url"),
+    db_path: Path = typer.Option(_default_auth_db_path(), "--db-path"),
+    headless: bool = typer.Option(_default_headless(), "--headless/--no-headless"),
+) -> None:
+    manager = _create_auth_manager(db_path, headless=headless)
+
+    async def _run() -> None:
+        browser_manager = _create_browser_manager(headless=headless)
+        await browser_manager.start()
+        try:
+            page = await manager.open_site(session_id, url, browser_manager)
+            typer.echo(f"打开成功: session_id={session_id} url={url}")
+            await page.wait_for_event("close")
+        finally:
+            await browser_manager.close()
+
+    try:
+        asyncio.run(_run())
+    except SessionNotFoundError as exc:
+        _exit_with_error(f"会话不存在: {exc}", 10)
+    except SiteNotSupportedError as exc:
+        _exit_with_error(f"站点不支持: {exc}", 11)
+    except AuthError as exc:
+        _exit_with_error(f"认证失败: {exc}", 10)
+    except BrowserError as exc:
+        _exit_with_error(f"浏览器失败: {exc}", 20)
+    except Exception as exc:
+        _exit_with_error(f"未知错误: {exc}", 99)
