@@ -34,6 +34,10 @@ class BrowserConfig(BaseSettings):
     headless: bool = Field(default=True, description="是否无头模式")
     timeout: int = Field(default=30000, description="默认超时时间（毫秒）")
     user_data_dir: Optional[Path] = Field(default=None, description="用户数据目录")
+    proxy_server: Optional[str] = Field(default=None, description="浏览器代理地址")
+    proxy_username: Optional[str] = Field(default=None, description="浏览器代理用户名")
+    proxy_password: Optional[str] = Field(default=None, description="浏览器代理密码")
+    proxy_bypass: Optional[str] = Field(default=None, description="浏览器代理绕过地址")
 
     @field_validator("user_data_dir")
     @classmethod

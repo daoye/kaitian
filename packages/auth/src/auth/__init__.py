@@ -3,7 +3,7 @@
 from .__version__ import __version__
 from .manager import AuthManager
 from .repository import SessionRepository
-from .sites import ZnzmoAuthenticator
+from .sites import ThreeDBruteAuthenticator, ZnzmoAuthenticator
 from .types import Credentials, CaptchaOutcome, VerifyResult
 from .verification import (
     VerificationCodeChallenge,
@@ -26,6 +26,7 @@ __all__ = [
     "AuthManager",
     "SessionRepository",
     # 站点适配器
+    "ThreeDBruteAuthenticator",
     "ZnzmoAuthenticator",
     # 类型
     "Credentials",

@@ -83,12 +83,14 @@ source = { editable = "packages/auth" }
 dependencies = [
     { name = "browser" },
     { name = "core" },
+    { name = "stealth" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "browser", editable = "packages/browser" },
     { name = "core", editable = "packages/core" },
+    { name = "stealth", editable = "packages/stealth" },
 ]
 
 [[package]]

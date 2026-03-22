@@ -6,7 +6,7 @@ from browser import BrowserLaunchOptions, BrowserManager
 from browser.exceptions import BrowserError
 from rich.console import Console
 
-from auth import AuthManager, SessionRepository, ZnzmoAuthenticator
+from auth import AuthManager, SessionRepository, ThreeDBruteAuthenticator, ZnzmoAuthenticator
 from auth.exceptions import AuthError, SessionNotFoundError, SiteNotSupportedError
 from core import get_config
 
@@ -22,17 +22,38 @@ def _default_headless() -> bool:
     return get_config().browser.headless
 
 
+def _default_browser_proxy() -> dict[str, str] | None:
+    browser_config = get_config().browser
+    if not browser_config.proxy_server:
+        return None
+    proxy = {"server": browser_config.proxy_server}
+    if browser_config.proxy_username:
+        proxy["username"] = browser_config.proxy_username
+    if browser_config.proxy_password:
+        proxy["password"] = browser_config.proxy_password
+    if browser_config.proxy_bypass:
+        proxy["bypass"] = browser_config.proxy_bypass
+    return proxy
+
+
 def _create_auth_manager(db_path: Path, headless: bool | None = None) -> AuthManager:
     resolved = db_path.expanduser().resolve()
     resolved.parent.mkdir(parents=True, exist_ok=True)
     manager = AuthManager(SessionRepository(str(resolved)))
     effective_headless = _default_headless() if headless is None else headless
+    manager.register_authenticator(
+        "3dbrute",
+        ThreeDBruteAuthenticator(
+            headless=effective_headless,
+            proxy=_default_browser_proxy(),
+        ),
+    )
     manager.register_authenticator("znzmo", ZnzmoAuthenticator(headless=effective_headless))
     return manager
 
 
 def _create_browser_manager(headless: bool) -> BrowserManager:
-    return BrowserManager(BrowserLaunchOptions(headless=headless))
+    return BrowserManager(BrowserLaunchOptions(headless=headless, proxy=_default_browser_proxy()))
 
 
 def _exit_with_error(message: str, code: int) -> None:
