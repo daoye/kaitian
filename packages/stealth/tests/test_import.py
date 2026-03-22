@@ -26,3 +26,11 @@ def test_custom_profile_is_preserved() -> None:
     manager = StealthManager(custom_profile=profile)
 
     assert manager.build_plan().profile == profile
+
+
+def test_get_random_delay_returns_supported_range() -> None:
+    manager = StealthManager()
+
+    value = manager.get_random_delay("click")
+
+    assert 0.1 <= value <= 0.3

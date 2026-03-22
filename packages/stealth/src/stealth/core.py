@@ -1,4 +1,5 @@
 from importlib import import_module
+import random
 from typing import Any
 
 from .types import PRESET_PROFILES, StealthConfig, StealthPlan, StealthProfile
@@ -34,6 +35,16 @@ class StealthManager:
 
     async def apply_to_page(self, page: Any, url: str | None = None) -> None:
         return
+
+    def get_random_delay(self, action: str) -> float:
+        ranges = {
+            "click": (0.1, 0.3),
+            "type": (0.05, 0.15),
+            "scroll": (0.2, 0.5),
+            "wait": (1.0, 3.0),
+        }
+        lower, upper = ranges.get(action, (0.1, 0.3))
+        return random.uniform(lower, upper)
 
     def _get_profile(self) -> StealthProfile:
         if self._custom_profile is not None:
