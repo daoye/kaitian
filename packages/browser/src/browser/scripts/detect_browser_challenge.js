@@ -32,20 +32,24 @@
 
   const recaptchaField = document.querySelector('[name="g-recaptcha-response"]');
   const recaptchaValue = recaptchaField ? recaptchaField.value.trim() : '';
+  const recaptchaIframe = document.querySelector('iframe[src*="recaptcha"]');
+  const recaptchaWidget = document.querySelector('.g-recaptcha, [data-sitekey]');
+  const recaptchaBadge = document.querySelector('.grecaptcha-badge');
+  const isIframeInVerifyMode = recaptchaIframe && recaptchaIframe.src.includes('/verify?');
+  const isIframeVisible = recaptchaIframe && getComputedStyle(recaptchaIframe).display !== 'none';
   if (
-    (!recaptchaValue && recaptchaField) ||
-    document.querySelector('.g-recaptcha') ||
-    document.querySelector('iframe[src*="recaptcha"]')
+    recaptchaValue ||
+    isIframeInVerifyMode ||
+    (recaptchaWidget && !recaptchaBadge)
   ) {
-    const widget = document.querySelector('.g-recaptcha, [data-sitekey]');
     return {
       provider: 'google',
       challenge_type: 'recaptcha',
       message: 'Google reCAPTCHA detected',
-      site_key: widget ? (widget.getAttribute('data-sitekey') || widget.getAttribute('sitekey')) : null,
+      site_key: recaptchaWidget ? (recaptchaWidget.getAttribute('data-sitekey') || recaptchaWidget.getAttribute('sitekey')) : null,
       response_field: 'g-recaptcha-response',
       widget_selector: '.g-recaptcha',
-      action: widget ? widget.getAttribute('data-action') : null,
+      action: recaptchaWidget ? recaptchaWidget.getAttribute('data-action') : null,
     };
   }
 
