@@ -98,7 +98,7 @@ class ZnzmoAuthenticator(Authenticator):
         stealth_hook: Optional[Callable] = None,
         verification_code_provider: Optional[VerificationCodeProvider] = None,
         headless: bool = True,
-        enable_cdc: bool = False,
+        enable_cdp: bool = False,
         cdp_port: int | None = None,
     ):
         """初始化认证适配器.
@@ -111,7 +111,7 @@ class ZnzmoAuthenticator(Authenticator):
         """
         self._captcha_solver = captcha_solver
         self._timeout = timeout
-        self._enable_cdc = enable_cdc
+        self._enable_cdp = enable_cdp
         self._cdp_port = cdp_port
         self._selectors = {**self.DEFAULT_SELECTORS, **(selectors or {})}
         self._stealth_hook = stealth_hook
@@ -121,7 +121,7 @@ class ZnzmoAuthenticator(Authenticator):
         self._browser_manager = BrowserManager(
             launch_options=BrowserLaunchOptions(
                 headless=headless,
-                enable_cdc=enable_cdc,
+                enable_cdp=enable_cdp,
                 cdp_port=cdp_port,
             ),
             stealth_hook=stealth_hook,

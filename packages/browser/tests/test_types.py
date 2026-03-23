@@ -14,6 +14,7 @@ def test_launch_defaults() -> None:
     options = BrowserLaunchOptions()
     assert options.engine == "chromium"
     assert options.headless is True
+    assert options.enable_cdp is False
 
 
 def test_context_options_defaults() -> None:

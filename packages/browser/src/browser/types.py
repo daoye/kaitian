@@ -29,7 +29,7 @@ class BrowserLaunchOptions:
     page_timeout_ms: int = 10000
     max_contexts: int = 10  # 最大上下文数量限制
     slow_mo_ms: int = 0
-    enable_cdc: bool = False
+    enable_cdp: bool = False
     cdp_port: int | None = None
     launch_args: list[str] = field(default_factory=list)
     proxy: dict[str, str] | None = None

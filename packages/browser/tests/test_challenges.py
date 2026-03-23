@@ -63,6 +63,8 @@ async def test_apply_browser_challenge_token_uses_extracted_script():
     page.evaluate.assert_awaited_once()
     script, payload = page.evaluate.await_args.args
     assert "g-recaptcha-response" in script
+    assert "data-callback" in script
+    assert "___grecaptcha_cfg" in script
     assert payload == {"token": "token-123", "responseField": "g-recaptcha-response"}
 
 

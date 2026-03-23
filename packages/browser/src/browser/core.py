@@ -162,13 +162,12 @@ class BrowserManager:
             self._playwright = await runner.start()
             engine = getattr(self._playwright, self._launch_options.engine)
             args = self._launch_options.launch_args.copy()
-            if self._launch_options.enable_cdc:
+            if self._launch_options.enable_cdp:
                 args.append("--auto-open-devtools-for-tabs")
             if self._launch_options.cdp_port is not None:
                 args.append(f"--remote-debugging-port={self._launch_options.cdp_port}")
             else:
-                # 如果启用 CDC 但没有指定端口，使用默认端口 9222
-                if self._launch_options.enable_cdc:
+                if self._launch_options.enable_cdp:
                     args.append("--remote-debugging-port=9222")
             launch_kwargs = {
                 "headless": self._launch_options.headless,

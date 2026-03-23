@@ -39,7 +39,7 @@ def _default_browser_proxy() -> dict[str, str] | None:
 def _create_auth_manager(
     db_path: Path,
     headless: bool | None = None,
-    enable_cdc: bool = False,
+    enable_cdp: bool = False,
     cdp_port: int | None = None,
 ) -> AuthManager:
     resolved = db_path.expanduser().resolve()
@@ -51,25 +51,25 @@ def _create_auth_manager(
         ThreeDBruteAuthenticator(
             headless=effective_headless,
             proxy=_default_browser_proxy(),
-            enable_cdc=enable_cdc,
+            enable_cdp=enable_cdp,
             cdp_port=cdp_port,
         ),
     )
     manager.register_authenticator(
         "znzmo",
-        ZnzmoAuthenticator(headless=effective_headless, enable_cdc=enable_cdc, cdp_port=cdp_port),
+        ZnzmoAuthenticator(headless=effective_headless, enable_cdp=enable_cdp, cdp_port=cdp_port),
     )
     return manager
 
 
 def _create_browser_manager(
-    headless: bool, enable_cdc: bool = False, cdp_port: int | None = None
+    headless: bool, enable_cdp: bool = False, cdp_port: int | None = None
 ) -> BrowserManager:
     return BrowserManager(
         BrowserLaunchOptions(
             headless=headless,
             proxy=_default_browser_proxy(),
-            enable_cdc=enable_cdc,
+            enable_cdp=enable_cdp,
             cdp_port=cdp_port,
         )
     )
@@ -89,14 +89,12 @@ def login(
     sms_code: str | None = typer.Option(None, "--sms-code"),
     db_path: Path = typer.Option(_default_auth_db_path(), "--db-path"),
     headless: bool = typer.Option(_default_headless(), "--headless/--no-headless"),
-    enable_cdc: bool = typer.Option(
-        False, "--enable-cdc/--disable-cdc", help="启用 Chrome DevTools"
-    ),
+    enable_cdp: bool = typer.Option(False, "--enable-cdp", help="启用 Chrome DevTools Protocol"),
     cdp_port: int | None = typer.Option(None, "--cdp-port", help="CDP 端口"),
 ) -> None:
     manager_kwargs = {"headless": headless}
-    if enable_cdc or cdp_port is not None:
-        manager_kwargs["enable_cdc"] = enable_cdc
+    if enable_cdp or cdp_port is not None:
+        manager_kwargs["enable_cdp"] = enable_cdp
         manager_kwargs["cdp_port"] = cdp_port
     manager = _create_auth_manager(db_path, **manager_kwargs)
     if mode not in {"password", "sms"}:
@@ -221,19 +219,17 @@ def list_sessions(
 def open_site(
     session_id: str = typer.Option(..., "--session-id"),
     url: str = typer.Option(..., "--url"),
-    enable_cdc: bool = typer.Option(
-        False, "--enable-cdc/--disable-cdc", help="启用 Chrome DevTools"
-    ),
+    enable_cdp: bool = typer.Option(False, "--enable-cdp", help="启用 Chrome DevTools Protocol"),
     cdp_port: int | None = typer.Option(None, "--cdp-port", help="CDP 端口"),
     db_path: Path = typer.Option(_default_auth_db_path(), "--db-path"),
     headless: bool = typer.Option(_default_headless(), "--headless/--no-headless"),
 ) -> None:
     manager_kwargs = {"headless": headless}
     browser_kwargs = {"headless": headless}
-    if enable_cdc or cdp_port is not None:
-        manager_kwargs["enable_cdc"] = enable_cdc
+    if enable_cdp or cdp_port is not None:
+        manager_kwargs["enable_cdp"] = enable_cdp
         manager_kwargs["cdp_port"] = cdp_port
-        browser_kwargs["enable_cdc"] = enable_cdc
+        browser_kwargs["enable_cdp"] = enable_cdp
         browser_kwargs["cdp_port"] = cdp_port
     manager = _create_auth_manager(db_path, **manager_kwargs)
 

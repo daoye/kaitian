@@ -38,7 +38,7 @@ class BrowserConfig(BaseSettings):
     proxy_username: Optional[str] = Field(default=None, description="浏览器代理用户名")
     proxy_password: Optional[str] = Field(default=None, description="浏览器代理密码")
     proxy_bypass: Optional[str] = Field(default=None, description="浏览器代理绕过地址")
-    enable_cdc: bool = Field(default=False, description="是否启用 CDC")
+    enable_cdp: bool = Field(default=False, description="是否启用 CDP")
     cdp_port: Optional[int] = Field(default=None, description="CDP 端口")
 
     @field_validator("user_data_dir")

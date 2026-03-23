@@ -116,7 +116,7 @@ def test_doctor_command():
 def test_auth_login_password(monkeypatch):
     manager = DummyManager()
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(
@@ -147,7 +147,7 @@ def test_auth_login_password(monkeypatch):
 def test_auth_login_sms(monkeypatch):
     manager = DummyManager()
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(
@@ -176,8 +176,9 @@ def test_auth_login_no_headless_passed_to_manager(monkeypatch):
     manager = DummyManager()
     captured: dict[str, object] = {}
 
-    def fake_create_auth_manager(db_path, headless=None):
+    def fake_create_auth_manager(db_path, headless=None, **kwargs):
         captured["headless"] = headless
+        captured.update(kwargs)
         return manager
 
     monkeypatch.setattr("cli.commands.auth._create_auth_manager", fake_create_auth_manager)
@@ -201,10 +202,45 @@ def test_auth_login_no_headless_passed_to_manager(monkeypatch):
     assert captured["headless"] is False
 
 
+def test_auth_login_enable_cdp_passed_to_manager(monkeypatch):
+    manager = DummyManager()
+    captured: dict[str, object] = {}
+
+    def fake_create_auth_manager(db_path, headless=None, **kwargs):
+        captured["headless"] = headless
+        captured.update(kwargs)
+        return manager
+
+    monkeypatch.setattr("cli.commands.auth._create_auth_manager", fake_create_auth_manager)
+
+    result = runner.invoke(
+        app,
+        [
+            "auth",
+            "login",
+            "--site",
+            "znzmo",
+            "--account",
+            "tester",
+            "--mode",
+            "password",
+            "--password",
+            "secret",
+            "--enable-cdp",
+            "--cdp-port",
+            "9223",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["enable_cdp"] is True
+    assert captured["cdp_port"] == 9223
+
+
 def test_auth_verify_invalid(monkeypatch):
     manager = DummyManager(verify_result=False)
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(
@@ -219,7 +255,7 @@ def test_auth_verify_invalid(monkeypatch):
 def test_auth_refresh(monkeypatch):
     manager = DummyManager(refresh_result=DummySession(account_id="tester"))
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(
@@ -235,7 +271,7 @@ def test_auth_refresh(monkeypatch):
 def test_auth_refresh_failed(monkeypatch):
     manager = DummyManager(refresh_result=None)
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(
@@ -250,7 +286,7 @@ def test_auth_refresh_failed(monkeypatch):
 def test_auth_logout(monkeypatch):
     manager = DummyManager(logout_result=True)
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(
@@ -265,7 +301,7 @@ def test_auth_logout(monkeypatch):
 def test_auth_list_sessions(monkeypatch):
     manager = DummyManager(list_result=[DummySession(account_id="tester")])
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(app, ["auth", "list", "--site", "znzmo"])
@@ -282,7 +318,7 @@ def test_auth_list_sessions_all_sites(monkeypatch):
     )
     manager.list_result[1].session_id = "session-002"
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(app, ["auth", "list"])
@@ -296,7 +332,7 @@ def test_auth_list_sessions_all_sites(monkeypatch):
 def test_auth_list_sessions_empty(monkeypatch):
     manager = DummyManager(list_result=[])
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(app, ["auth", "list", "--site", "znzmo"])
@@ -308,7 +344,7 @@ def test_auth_list_sessions_empty(monkeypatch):
 def test_auth_list_sessions_empty_all_sites(monkeypatch):
     manager = DummyManager(list_result=[])
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
 
     result = runner.invoke(app, ["auth", "list"])
@@ -321,10 +357,10 @@ def test_auth_open(monkeypatch):
     manager = DummyManager()
     browser_manager = DummyBrowserManager()
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
     monkeypatch.setattr(
-        "cli.commands.auth._create_browser_manager", lambda headless: browser_manager
+        "cli.commands.auth._create_browser_manager", lambda headless, **kwargs: browser_manager
     )
 
     result = runner.invoke(
@@ -346,10 +382,10 @@ def test_auth_open_not_found(monkeypatch):
     manager = DummyManager(open_error=SessionNotFoundError("missing"))
     browser_manager = DummyBrowserManager()
     monkeypatch.setattr(
-        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None: manager
+        "cli.commands.auth._create_auth_manager", lambda db_path, headless=None, **kwargs: manager
     )
     monkeypatch.setattr(
-        "cli.commands.auth._create_browser_manager", lambda headless: browser_manager
+        "cli.commands.auth._create_browser_manager", lambda headless, **kwargs: browser_manager
     )
 
     result = runner.invoke(

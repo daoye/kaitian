@@ -51,18 +51,18 @@ KaiTian CLI 支持通过命令行控制 CDP 模式：
 
 ```bash
 # 启用 CDP，使用默认端口
-uv run kaitian auth login --site znzmo --account test --enable-cdc --no-headless
+uv run kaitian auth login --site znzmo --account test --enable-cdp --no-headless
 
 # 启用 CDP，指定端口
-uv run kaitian auth login --site znzmo --account test --enable-cdc --cdp-port 9223 --no-headless
+uv run kaitian auth login --site znzmo --account test --enable-cdp --cdp-port 9223 --no-headless
 
-# 禁用 CDP（默认）
-uv run kaitian auth login --site znzmo --account test --disable-cdc
+# 默认不启用 CDP；需要时显式传入 --enable-cdp
+uv run kaitian auth login --site znzmo --account test --no-headless
 ```
 
 **CLI 参数说明**：
 
-- `--enable-cdc` / `--disable-cdc`：控制是否启用 Chrome DevTools Protocol
+- `--enable-cdp`：控制是否启用 Chrome DevTools Protocol
 - `--cdp-port`：指定 CDP 端口（可选，默认 9222）
 - `--headless` / `--no-headless`：控制是否无头模式（CDP 模式通常需要 `--no-headless`）
 
@@ -170,7 +170,7 @@ class BrowserLaunchOptions:
     headless: bool = True                    # 是否无头模式
     timeout_ms: int = 30000                  # 启动超时（毫秒）
     slow_mo_ms: int = 0                      # 慢速模式（毫秒）
-    enable_cdc: bool = False                 # 是否启用 Chrome DevTools Protocol
+    enable_cdp: bool = False                 # 是否启用 Chrome DevTools Protocol
     cdp_port: int | None = None              # Chrome DevTools Protocol 端口（默认 9222）
     launch_args: list[str] = []              # 额外启动参数
     proxy: dict[str, str] | None = None      # 代理配置
@@ -183,13 +183,13 @@ class BrowserLaunchOptions:
 ```python
 # 启用 CDP，使用默认端口 9222
 launch_options = BrowserLaunchOptions(
-    enable_cdc=True,
+    enable_cdp=True,
     headless=False,  # CDP 模式通常需要非无头模式
 )
 
 # 启用 CDP，指定端口
 launch_options = BrowserLaunchOptions(
-    enable_cdc=True,
+    enable_cdp=True,
     cdp_port=9223,
     headless=False,
 )

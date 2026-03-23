@@ -54,12 +54,12 @@ class ThreeDBruteAuthenticator(Authenticator):
         headless: bool = True,
         proxy: Optional[Dict[str, str]] = None,
         captcha_solver: Any | None = None,
-        enable_cdc: bool = False,
+        enable_cdp: bool = False,
         cdp_port: int | None = None,
     ) -> None:
         self._headless = headless
         self._timeout = timeout
-        self._enable_cdc = enable_cdc
+        self._enable_cdp = enable_cdp
         self._cdp_port = cdp_port
         self._selectors = {**self.DEFAULT_SELECTORS, **(selectors or {})}
         self._captcha_orchestrator = CaptchaOrchestrator(
@@ -84,7 +84,7 @@ class ThreeDBruteAuthenticator(Authenticator):
             launch_options=BrowserLaunchOptions(
                 headless=headless,
                 proxy=proxy,
-                enable_cdc=enable_cdc,
+                enable_cdp=enable_cdp,
                 cdp_port=cdp_port,
             ),
             stealth_hook=stealth_hook,
