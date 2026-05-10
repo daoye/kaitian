@@ -2,81 +2,55 @@
 - 使用中文跟我交流
 - 本项目的所有文档使用中文书写
 
-
 # 项目概述
 
-### 项目名称
-- 英文名：**KaiTian**
-- 中文名：**开天**
+**KaiTian（开天）** — 模块化自动化采集与搬运工具集，monorepo 组织。
 
-### 项目定位
-KaiTian 是一个基于 Python 开发的、采用 monorepo 组织方式的**模块化自动化采集与搬运工具集**。
-
-项目核心目标不是构建一个庞大的平台，而是实现一组**可独立使用、可自由组合的原子模块**，用于解决以下场景：
-
-- 网站账号登录与会话状态维护
-- 基于 Playwright 的自动化访问
-- 资源下载
-- 资源质量校验
-- 资源上传与发布
-- 等等，后续还活会扩展其他能力，比如：热点抓取、评论采集等能力
+核心场景：网站登录 → 资源采集 → 下载 → 校验 → 发布
 
 ### 设计原则
-本项目严格遵循以下原则：
+- **简单优先**：可运行 > 理论上完美，避免过度设计
+- **站点隔离**：站点特定代码集中在 `packages/sites/{site}/`，`packages/downloader/` 只放通用能力
+- **原子化**：每个模块只做一件事
+- **最小依赖**：默认不用 Redis/PostgreSQL/消息队列，优先 SQLite
+- **非浏览器优先**：元数据提取走 HTTP（httpx），文件下载走 presigned URL，只在必要时用 Playwright
 
-#### 简单优先
-- 避免过度设计
-- 避免复杂分层
-- 避免引入不必要的基础设施
-- 优先可运行、可维护，而不是“理论上完美”
-- 避免依赖注入等复杂模式，优先显式依赖和直接导入
+### 技术选型
+Python 3.12+ | uv | httpx | BeautifulSoup4 | LangGraph | langchain-mcp-adapters | Playwright（可选） | SQLite | toml | Pillow
 
-#### 模块依赖约束
-- browser 负责页面自动化流程，遇到验证码时调用 captcha 模块处理
-- captcha 仅提供识别与求解能力，不依赖 browser
+### 项目结构
+```
+packages/
+├── core/       # 配置、数据模型、类型、异常
+├── auth/       # 认证与会话（SessionRepository）
+├── browser/    # Playwright 封装（可选）
+├── downloader/ # HTTP 客户端、爬虫编排、后处理、SQLite 记录
+├── agent/      # LangGraph 智能体（文本清洗、MCP）
+├── sites/      # 站点实现（three_dbrute/ 等）
+├── captcha/    # 验证码
+├── validator/  # 校验
+├── publisher/  # 发布
+└── stealth/    # 隐身
+apps/
+├── cli/        # kaitian 命令
+└── api/        # FastAPI
+```
 
-#### 原子化设计
-- 每个模块只做一件事
-- 下载、校验、上传必须彼此独立
-- 模块之间通过清晰的数据结构交互，而不是硬编码耦合
+### 配置
+`kaitian.toml`，支持环境变量覆盖（`KAITIAN_LLM__API_KEY` 等）。
 
-#### 最小依赖
-- 尽量不依赖外部服务
-- 默认不使用 Redis、PostgreSQL、消息队列等独立部署组件
-- 优先采用嵌入式方案，例如 SQLite
+### CLI 速查
+| 命令 | 用途 |
+|------|------|
+| `auth import` | 批量导入 cookie |
+| `auth set-meta <site> <account> <key> <val>` | 设置会话 metadata |
+| `crawl detail <url>` | HTTP 提取元数据 |
+| `crawl model <url>` | 完整采集一个模型 |
+| `crawl batch --limit N` | 批量下载 |
+| `crawl batch --daemon` | 守护模式持续下载 |
+| `crawl postprocess <dir>` | 后处理（解压/转格式） |
+| `crawl agent text_clean --model-dir <dir>` | LLM 文本清洗 |
+| `record check/set/list/done` | 下载进度管理 |
 
-#### 易于本地部署
-- 支持单机运行
-- 开发、测试、部署尽量一致
-- 尽量降低环境复杂度
-
-## 技术选型
-- Python 3.12+
-- uv
-- playwright
-- fastapi
-- sqlite
-- toml
-
-
-## 非本项目目标
-
-* 不做复杂分布式架构
-* 不做外部数据库部署
-* 不做 Redis / MQ / Celery
-* 不做复杂权限系统
-* 不做多租户设计
-* 不做可视化流程编排器
-* 不做复杂插件系统
-* 不做过早的通用抽象框架
-* 不做高级 AI 质量评估
-
-### 风险
-
-随着需求增加，相关功能可能逐渐写死在一个流程里。
-
-### 应对
-
-* 始终坚持模块分离
-* 工作流文件只做串联，不写具体站点细节
-* 始终保证各单位模块可单独运行
+### 非目标
+分布式架构 / Redis / MQ / 权限系统 / 多租户 / 插件系统
