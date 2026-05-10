@@ -51,21 +51,13 @@ class ThreeDBruteAuthenticator(Authenticator):
         self,
         timeout: int = 3000000,
         selectors: Optional[Dict[str, str]] = None,
-        headless: bool = True,
-        proxy: Optional[Dict[str, str]] = None,
         captcha_solver: Any | None = None,
-        enable_cdp: bool = False,
-        cdp_port: int | None = None,
     ) -> None:
-        self._headless = headless
         self._timeout = timeout
-        self._enable_cdp = enable_cdp
-        self._cdp_port = cdp_port
         self._selectors = {**self.DEFAULT_SELECTORS, **(selectors or {})}
         self._captcha_orchestrator = CaptchaOrchestrator(
             [captcha_solver] if captcha_solver is not None else [ManualCaptchaSolver()]
         )
-        # 运行时可观测性状态
         self._challenge_history: list[dict[str, str]] = []
         self._post_challenge_settle_urls: list[dict[str, str]] = []
         self._stealth_profile = PRESET_PROFILES["chrome_windows"]
@@ -75,19 +67,6 @@ class ThreeDBruteAuthenticator(Authenticator):
                 fingerprint_preset="chrome_windows",
             ),
             custom_profile=self._stealth_profile,
-        )
-
-        async def stealth_hook(context: Any) -> None:
-            await self._stealth_manager.apply_to_context(context, self.BASE_URL)
-
-        self._browser_manager = BrowserManager(
-            launch_options=BrowserLaunchOptions(
-                headless=headless,
-                proxy=proxy,
-                enable_cdp=enable_cdp,
-                cdp_port=cdp_port,
-            ),
-            stealth_hook=stealth_hook,
         )
 
     def _create_context_options(self) -> BrowserContextOptions:
@@ -174,9 +153,8 @@ class ThreeDBruteAuthenticator(Authenticator):
         except Exception:
             return
 
-    async def _new_context(self) -> Any:
-        await self._browser_manager.start()
-        return await self._browser_manager.new_context(self._create_context_options())
+    async def _new_context(self, browser_manager: Any) -> Any:
+        return await browser_manager.new_context(self._create_context_options())
 
     async def _open_page(self, context: Any, url: str) -> Any:
         page = await context.new_page()
@@ -445,7 +423,11 @@ class ThreeDBruteAuthenticator(Authenticator):
                 "3dbrute login did not complete", reason="login_timeout"
             ) from exc
 
-    async def login(self, credentials: Dict[str, Any]) -> Session:
+    async def login(
+        self,
+        credentials: Dict[str, Any],
+        browser_manager: Any,
+    ) -> Session:
         username = str(credentials.get("username") or "").strip()
         password = str(credentials.get("password") or "").strip()
         if not username or not password:
@@ -496,7 +478,11 @@ class ThreeDBruteAuthenticator(Authenticator):
             await self._close_page_safely(page)
             await self._close_context_safely(context)
 
-    async def verify(self, session: Session) -> bool:
+    async def verify(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> bool:
         if session.is_expired() or not session.cookies:
             return False
 
@@ -504,7 +490,7 @@ class ThreeDBruteAuthenticator(Authenticator):
         page = None
 
         try:
-            context = await self._new_context()
+            context = await self._new_context(browser_manager)
             await self._apply_session_cookies(context, session)
             page = await self._open_page(context, self.DASHBOARD_URL)
             has_auth_cookies = await self._has_auth_cookies(context)
@@ -524,22 +510,30 @@ class ThreeDBruteAuthenticator(Authenticator):
             await self._close_page_safely(page)
             await self._close_context_safely(context)
 
-    async def refresh(self, session: Session) -> Session:
+    async def refresh(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> Session:
         if session.is_expired():
             raise SessionExpiredError("Session has already expired")
-        is_valid = await self.verify(session)
+        is_valid = await self.verify(session, browser_manager)
         if not is_valid:
             raise SessionExpiredError("Session is no longer valid")
         session.expires_at = datetime.now() + timedelta(days=7)
         session.update_usage()
         return session
 
-    async def logout(self, session: Session) -> bool:
+    async def logout(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> bool:
         context = None
         page = None
 
         try:
-            context = await self._new_context()
+            context = await self._new_context(browser_manager)
             await self._apply_session_cookies(context, session)
             page = await self._open_page(context, self.LOGOUT_URL)
             return True
@@ -552,12 +546,3 @@ class ThreeDBruteAuthenticator(Authenticator):
         finally:
             await self._close_page_safely(page)
             await self._close_context_safely(context)
-
-    async def close(self) -> None:
-        await self._browser_manager.close()
-
-    async def __aenter__(self) -> "ThreeDBruteAuthenticator":
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        await self.close()

@@ -27,17 +27,28 @@ class BrowserLaunchOptions:
     headless: bool = True
     timeout_ms: int = 30000
     page_timeout_ms: int = 10000
-    max_contexts: int = 10  # 最大上下文数量限制
+    max_contexts: int = 10
     slow_mo_ms: int = 0
+    # 启用 CDP 模式：自动检测并连接，没有则自动启动
     enable_cdp: bool = False
-    cdp_port: int | None = None
     launch_args: list[str] = field(default_factory=list)
     proxy: dict[str, str] | None = None
+
+    # CDP 端点 URL（可选，默认 http://localhost:9222）
+    cdp_endpoint_url: str | None = None
+    # CDP 端口（可选，默认 9222）
+    remote_debugging_port: int | None = None
+    cdp_headers: dict[str, str] = field(default_factory=dict)
+
+
+ContextPreference = Literal["auto", "attached", "new"]
 
 
 @dataclass(slots=True)
 class BrowserContextOptions:
     reuse_key: str | None = None
+    # 上下文偏好：auto（自动选择）、attached（使用已附加的默认上下文）、new（创建新上下文）
+    context_preference: ContextPreference = "auto"
     base_url: str | None = None
     viewport: dict[str, int] | None = None
     user_agent: str | None = None

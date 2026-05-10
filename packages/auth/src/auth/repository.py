@@ -12,7 +12,7 @@ from .exceptions import SessionNotFoundError, SessionStorageError
 class SessionRepository:
     """SQLite 会话存储仓库."""
 
-    def __init__(self, db_path: str = "./data/auth.db"):
+    def __init__(self, db_path: str = "./data/kaitian.db"):
         self.db_path = db_path
         self._init_db()
 

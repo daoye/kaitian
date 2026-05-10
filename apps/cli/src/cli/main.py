@@ -5,10 +5,14 @@ import typer
 
 from cli.__version__ import __version__
 from cli.commands.auth import router as auth_router
+from cli.commands.crawl import router as crawl_router
+from cli.commands.record import router as record_router
 from core import get_config
 
 app = typer.Typer(help="KaiTian 模块化采集工具")
 app.add_typer(auth_router, name="auth")
+app.add_typer(crawl_router, name="crawl")
+app.add_typer(record_router, name="record")
 
 
 @app.command()
@@ -19,10 +23,8 @@ def version() -> None:
 @app.command()
 def doctor() -> None:
     config = get_config()
-    auth_db_path = config.database.path.parent / "auth.db"
     typer.echo(f"cli_version={__version__}")
     typer.echo(f"database_path={config.database.path}")
-    typer.echo(f"auth_db_path={auth_db_path}")
     typer.echo(f"browser_headless={config.browser.headless}")
     typer.echo(f"browser_timeout={config.browser.timeout}")
     for package_name in ("core", "auth", "browser", "downloader", "validator", "publisher"):

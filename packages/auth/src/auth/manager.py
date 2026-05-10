@@ -2,7 +2,6 @@
 
 from typing import Any, Dict, Optional
 
-from browser import BrowserManager
 from core.models import Authenticator, Session
 from .exceptions import AuthError, SessionNotFoundError, SiteNotSupportedError
 from .repository import SessionRepository
@@ -19,13 +18,20 @@ class AuthManager:
         """注册站点认证器."""
         self._authenticators[site] = authenticator
 
-    async def login(self, site: str, account_id: str, credentials: Dict[str, Any]) -> Session:
+    async def login(
+        self,
+        site: str,
+        account_id: str,
+        credentials: Dict[str, Any],
+        browser_manager: Any,
+    ) -> Session:
         """执行登录.
 
         Args:
             site: 站点标识
             account_id: 账号标识
             credentials: 登录凭据
+            browser_manager: 浏览器管理器实例
 
         Returns:
             登录成功后的会话
@@ -39,7 +45,7 @@ class AuthManager:
             raise SiteNotSupportedError(f"Site '{site}' is not supported")
 
         # 执行登录
-        session = await authenticator.login(credentials)
+        session = await authenticator.login(credentials, browser_manager)
         session.site = site
         session.account_id = account_id
 
@@ -70,12 +76,18 @@ class AuthManager:
             return None
         return session
 
-    async def verify(self, site: str, account_id: str) -> bool:
+    async def verify(
+        self,
+        site: str,
+        account_id: str,
+        browser_manager: Any,
+    ) -> bool:
         """验证会话是否有效.
 
         Args:
             site: 站点标识
             account_id: 账号标识
+            browser_manager: 浏览器管理器实例
 
         Returns:
             会话是否有效
@@ -88,14 +100,20 @@ class AuthManager:
         if not authenticator:
             return False
 
-        return await authenticator.verify(session)
+        return await authenticator.verify(session, browser_manager)
 
-    async def refresh(self, site: str, account_id: str) -> Optional[Session]:
+    async def refresh(
+        self,
+        site: str,
+        account_id: str,
+        browser_manager: Any,
+    ) -> Optional[Session]:
         """刷新会话.
 
         Args:
             site: 站点标识
             account_id: 账号标识
+            browser_manager: 浏览器管理器实例
 
         Returns:
             刷新后的会话，失败返回 None
@@ -109,18 +127,24 @@ class AuthManager:
             raise SiteNotSupportedError(f"Site '{site}' is not supported")
 
         try:
-            refreshed = await authenticator.refresh(session)
+            refreshed = await authenticator.refresh(session, browser_manager)
             self._repository.save(refreshed)
             return refreshed
         except AuthError:
             return None
 
-    async def logout(self, site: str, account_id: str) -> bool:
+    async def logout(
+        self,
+        site: str,
+        account_id: str,
+        browser_manager: Any,
+    ) -> bool:
         """执行登出.
 
         Args:
             site: 站点标识
             account_id: 账号标识
+            browser_manager: 浏览器管理器实例
 
         Returns:
             是否成功登出
@@ -132,7 +156,7 @@ class AuthManager:
         authenticator = self._authenticators.get(site)
         if authenticator:
             try:
-                await authenticator.logout(session)
+                await authenticator.logout(session, browser_manager)
             except AuthError:
                 pass  # 即使远程登出失败也删除本地会话
 
@@ -144,7 +168,7 @@ class AuthManager:
             return self._repository.list_all()
         return self._repository.list_by_site(site)
 
-    async def open_site(self, session_id: str, url: str, browser_manager: BrowserManager) -> Any:
+    async def open_site(self, session_id: str, url: str, browser_manager: Any) -> Any:
         """使用指定会话打开目标网站."""
         session = self.get_session_by_id(session_id)
         if not session:

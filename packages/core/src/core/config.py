@@ -16,14 +16,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class DatabaseConfig(BaseSettings):
     """数据库配置"""
 
-    path: Path = Field(default=Path("./data/kaitian.db"), description="数据库路径")
-    url: str = Field(default="sqlite:///kaitian.db", description="数据库连接URL")
+    path: str = Field(default="./data/kaitian.db", description="数据库文件路径")
     echo: bool = Field(default=False, description="是否输出数据库日志")
-
-    @field_validator("path")
-    @classmethod
-    def resolve_database_path(cls, v: Path) -> Path:
-        return v.expanduser().resolve()
 
     model_config = SettingsConfigDict(env_prefix="KAITIAN_DB_")
 
@@ -38,8 +32,15 @@ class BrowserConfig(BaseSettings):
     proxy_username: Optional[str] = Field(default=None, description="浏览器代理用户名")
     proxy_password: Optional[str] = Field(default=None, description="浏览器代理密码")
     proxy_bypass: Optional[str] = Field(default=None, description="浏览器代理绕过地址")
-    enable_cdp: bool = Field(default=False, description="是否启用 CDP")
-    cdp_port: Optional[int] = Field(default=None, description="CDP 端口")
+
+    # CDP 模式配置
+    enable_cdp: bool = Field(
+        default=False, description="是否启用 CDP 模式（自动检测并连接，没有则自动启动）"
+    )
+    cdp_endpoint_url: Optional[str] = Field(
+        default=None, description="CDP 端点 URL（如 http://localhost:9222）"
+    )
+    remote_debugging_port: Optional[int] = Field(default=None, description="CDP 端口（默认 9222）")
 
     @field_validator("user_data_dir")
     @classmethod
@@ -53,11 +54,30 @@ class BrowserConfig(BaseSettings):
 
 
 class StealthConfig(BaseSettings):
-    """Stealth 配置"""
-
-    enabled: bool = Field(default=False, description="是否启用 Stealth")
-
+    """隐身配置"""
+    enabled: bool = Field(default=False, description="是否启用隐身模式")
     model_config = SettingsConfigDict(env_prefix="KAITIAN_STEALTH_")
+
+
+class CrawlConfig(BaseSettings):
+    """批量爬虫配置"""
+
+    restart_delay_hours: int = Field(default=24, description="daemon 模式全部完成后等待小时数")
+    request_delay_seconds: int = Field(default=3, description="请求间隔秒数")
+    retry_count: int = Field(default=3, description="网络错误重试次数")
+
+    model_config = SettingsConfigDict(env_prefix="KAITIAN_CRAWL_")
+
+
+class LlmConfig(BaseSettings):
+    """LLM 配置"""
+
+    provider: str = Field(default="openai", description="LLM 提供商")
+    model: str = Field(default="gpt-4o", description="模型名称")
+    api_key: str = Field(default="", description="API 密钥")
+    base_url: str = Field(default="", description="API 基础地址")
+
+    model_config = SettingsConfigDict(env_prefix="KAITIAN_LLM_")
 
 
 class DownloadConfig(BaseSettings):
@@ -68,6 +88,7 @@ class DownloadConfig(BaseSettings):
     retry_count: int = Field(default=3, description="重试次数")
     chunk_size: int = Field(default=8192, description="下载块大小（字节）")
     output_dir: Path = Field(default=Path("./downloads"), description="下载输出目录")
+    timeout_seconds: int = Field(default=300, description="文件下载超时秒数（大文件需要更长时间）")
 
     @field_validator("temp_dir")
     @classmethod
@@ -142,6 +163,8 @@ class CoreConfig(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
+    crawl: CrawlConfig = Field(default_factory=CrawlConfig)
+    llm: LlmConfig = Field(default_factory=LlmConfig)
     log: LogConfig = Field(default_factory=LogConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     stealth: StealthConfig = Field(default_factory=StealthConfig)
@@ -183,12 +206,6 @@ class ConfigManager:
 
     def _normalize_legacy_config(self, config: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(config)
-        database = dict(normalized.get("database", {}))
-        if "path" in database and "url" not in database:
-            database["url"] = f"sqlite:///{database['path']}"
-        if database:
-            normalized["database"] = database
-
         download = dict(normalized.get("download", {}))
         if "concurrent" in download and "max_concurrent" not in download:
             download["max_concurrent"] = download.pop("concurrent")

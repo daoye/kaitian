@@ -4,7 +4,7 @@
 包含所有模块共享的基础类型和枚举
 """
 
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 class ResourceStatus(Enum):
@@ -42,3 +42,33 @@ class LogLevel(Enum):
     WARNING = "warning"
     ERROR = "error"
     CRITICAL = "critical"
+
+
+class WorkflowStep(StrEnum):
+    """通用下载步骤枚举。
+
+    适用于任意网站的下载流程，按执行顺序排列：
+    pending → fetching → meta_extracted → file_downloaded
+    → previews_downloaded → processing → completed
+    """
+    PENDING = "pending"
+    FETCHING = "fetching"
+    META_EXTRACTED = "meta_extracted"
+    FILE_DOWNLOADED = "file_downloaded"
+    PREVIEWS_DOWNLOADED = "previews_downloaded"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+    @classmethod
+    def valid_steps(cls) -> list[str]:
+        return [s.value for s in cls if s.value not in ("completed", "failed")]
+
+
+class WorkflowStatus(StrEnum):
+    """工作流状态枚举"""
+    PENDING = "pending"
+    RUNNING = "running"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"

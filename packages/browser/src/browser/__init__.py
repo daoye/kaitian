@@ -4,8 +4,9 @@ from .challenges import (
     apply_browser_challenge_token,
     detect_browser_challenge,
 )
-from .core import BrowserManager, ManagedBrowserContext
+from .core import BrowserManager, ManagedBrowserContext, ManagedCdpSession, ManagedPage
 from .exceptions import (
+    BrowserCdpError,
     BrowserContextError,
     BrowserCookieError,
     BrowserError,
@@ -20,6 +21,8 @@ __all__ = [
     "__version__",
     "BrowserManager",
     "ManagedBrowserContext",
+    "ManagedCdpSession",
+    "ManagedPage",
     "BrowserChallenge",
     "apply_browser_challenge_token",
     "detect_browser_challenge",
@@ -34,4 +37,5 @@ __all__ = [
     "BrowserCookieError",
     "BrowserSessionError",
     "BrowserTimeoutError",
+    "BrowserCdpError",
 ]

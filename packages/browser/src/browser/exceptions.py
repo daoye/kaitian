@@ -27,3 +27,9 @@ class BrowserSessionError(SessionError):
 
 class BrowserTimeoutError(TimeoutError):
     pass
+
+
+class BrowserCdpError(BrowserError):
+    """CDP 会话错误"""
+
+    pass

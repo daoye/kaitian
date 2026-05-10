@@ -7,10 +7,9 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncContextManager, Dict, List, Optional, Protocol
+from typing import Any
 
-from .exceptions import KaitianError
-from .types import ResourceStatus
+from .types import ResourceStatus, WorkflowStatus, WorkflowStep
 
 
 class Resource:
@@ -22,9 +21,9 @@ class Resource:
     def __init__(
         self,
         id: str,
-        url: Optional[str] = None,
-        local_path: Optional[Path] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        url: str | None = None,
+        local_path: Path | None = None,
+        metadata: dict[str, Any] | None = None,
         status: ResourceStatus = ResourceStatus.PENDING,
     ):
         self.id = id
@@ -60,10 +59,10 @@ class Session:
         session_id: str,
         site: str,
         account_id: str,
-        cookies: Optional[Dict[str, str]] = None,
-        headers: Optional[Dict[str, str]] = None,
-        expires_at: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        cookies: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        expires_at: datetime | None = None,
+        metadata: dict[str, Any] | None = None,
     ):
         self.session_id = session_id
         self.site = site
@@ -100,9 +99,9 @@ class SessionGroup:
         name: str,
         source_session: str,
         target_session: str,
-        source_sessions: Optional[List[str]] = None,
-        target_sessions: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        source_sessions: list[str] | None = None,
+        target_sessions: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ):
         self.name = name
         self.source_session = source_session
@@ -132,9 +131,9 @@ class ValidationResult:
     def __init__(
         self,
         is_valid: bool,
-        errors: Optional[List[str]] = None,
-        warnings: Optional[List[str]] = None,
-        details: Optional[Dict[str, Any]] = None,
+        errors: list[str] | None = None,
+        warnings: list[str] | None = None,
+        details: dict[str, Any] | None = None,
     ):
         self.is_valid = is_valid
         self.errors = errors or []
@@ -161,9 +160,9 @@ class PublishResult:
     def __init__(
         self,
         success: bool,
-        url: Optional[str] = None,
-        errors: Optional[List[str]] = None,
-        details: Optional[Dict[str, Any]] = None,
+        url: str | None = None,
+        errors: list[str] | None = None,
+        details: dict[str, Any] | None = None,
     ):
         self.success = success
         self.url = url
@@ -187,11 +186,16 @@ class Authenticator(ABC):
     """
 
     @abstractmethod
-    async def login(self, credentials: Dict[str, Any]) -> Session:
+    async def login(
+        self,
+        credentials: dict[str, Any],
+        browser_manager: Any,
+    ) -> Session:
         """执行登录操作
 
         Args:
             credentials: 认证凭据
+            browser_manager: 浏览器管理器实例
 
         Returns:
             登录成功后的会话对象
@@ -202,11 +206,16 @@ class Authenticator(ABC):
         pass
 
     @abstractmethod
-    async def logout(self, session: Session) -> bool:
+    async def logout(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> bool:
         """执行登出操作
 
         Args:
             session: 要登出的会话
+            browser_manager: 浏览器管理器实例
 
         Returns:
             是否成功登出
@@ -217,11 +226,16 @@ class Authenticator(ABC):
         pass
 
     @abstractmethod
-    async def refresh(self, session: Session) -> Session:
+    async def refresh(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> Session:
         """刷新会话
 
         Args:
             session: 要刷新的会话
+            browser_manager: 浏览器管理器实例
 
         Returns:
             刷新后的会话对象
@@ -232,11 +246,16 @@ class Authenticator(ABC):
         pass
 
     @abstractmethod
-    async def verify(self, session: Session) -> bool:
+    async def verify(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> bool:
         """验证会话是否有效
 
         Args:
             session: 要验证的会话
+            browser_manager: 浏览器管理器实例
 
         Returns:
             会话是否有效
@@ -315,7 +334,7 @@ class Validator(ABC):
         pass
 
     @abstractmethod
-    async def get_supported_types(self) -> List[str]:
+    async def get_supported_types(self) -> list[str]:
         """获取支持的资源类型
 
         Returns:
@@ -361,7 +380,7 @@ class Publisher(ABC):
         pass
 
     @abstractmethod
-    async def get_status(self, resource_id: str) -> Dict[str, Any]:
+    async def get_status(self, resource_id: str) -> dict[str, Any]:
         """获取发布状态
 
         Args:
@@ -408,6 +427,47 @@ class BrowserContext(ABC):
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """异步退出上下文"""
         pass
+
+
+class Workflow:
+    """下载进度记录
+
+    记录一个 URL 的下载进度，用于 agent 做去重和中断恢复判断。
+    """
+
+    def __init__(
+        self,
+        id: str,
+        source: str,
+        source_url: str,
+        name: str | None = None,
+        step: WorkflowStep = WorkflowStep.PENDING,
+        status: WorkflowStatus = WorkflowStatus.PENDING,
+        created_at: str | None = None,
+        updated_at: str | None = None,
+    ):
+        self.id = id
+        self.source = source
+        self.source_url = source_url
+        self.name = name
+        self.step = step
+        self.status = status
+        now = datetime.utcnow().isoformat()
+        self.created_at = created_at or now
+        self.updated_at = updated_at or now
+
+    def is_done(self) -> bool:
+        """是否已完成或已失败"""
+        return self.status in (WorkflowStatus.COMPLETED, WorkflowStatus.FAILED)
+
+    def is_running(self) -> bool:
+        return self.status == WorkflowStatus.RUNNING
+
+    def __repr__(self) -> str:
+        return (
+            f"Workflow(id={self.id!r}, source={self.source!r}, "
+            f"step={self.step.value!r}, status={self.status.value!r})"
+        )
 
 
 class Storage(ABC):

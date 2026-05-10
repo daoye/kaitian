@@ -7,12 +7,18 @@ KaiTian 核心包
 # 版本信息
 from .__version__ import __author__, __email__, __version__
 
-# 类型定义
-from .types import (
-    LogLevel,
-    PublishTarget,
-    ResourceStatus,
-    ValidationLevel,
+# 配置管理
+from .config import (
+    BrowserConfig,
+    ConfigManager,
+    CoreConfig,
+    CrawlConfig,
+    DatabaseConfig,
+    DownloadConfig,
+    LlmConfig,
+    LogConfig,
+    SecurityConfig,
+    get_config,
 )
 
 # 异常定义
@@ -32,46 +38,30 @@ from .exceptions import (
     ValidationError,
 )
 
-# 配置管理
-from .config import (
-    BrowserConfig,
-    ConfigManager,
-    CoreConfig,
-    DatabaseConfig,
-    DownloadConfig,
-    LogConfig,
-    SecurityConfig,
-    get_config,
-)
-
 # 核心数据模型和接口
 from .models import (
     Authenticator,
     BrowserContext,
     Downloader,
     Publisher,
+    PublishResult,
     Resource,
     Session,
     SessionGroup,
     Storage,
-    Validator,
     ValidationResult,
-    PublishResult,
+    Validator,
+    Workflow,
 )
 
-# 核心数据模型和接口
-from .models import (
-    Authenticator,
-    BrowserContext,
-    Downloader,
-    Publisher,
-    Resource,
-    Session,
-    SessionGroup,
-    Storage,
-    Validator,
-    ValidationResult,
-    PublishResult,
+# 类型定义
+from .types import (
+    LogLevel,
+    PublishTarget,
+    ResourceStatus,
+    ValidationLevel,
+    WorkflowStatus,
+    WorkflowStep,
 )
 
 # 轮询等待辅助函数
@@ -88,6 +78,8 @@ __all__ = [
     "PublishTarget",
     "ResourceStatus",
     "ValidationLevel",
+    "WorkflowStep",
+    "WorkflowStatus",
     # 异常定义
     "KaitianError",
     "ConfigError",
@@ -106,7 +98,9 @@ __all__ = [
     "CoreConfig",
     "DatabaseConfig",
     "BrowserConfig",
+    "CrawlConfig",
     "DownloadConfig",
+    "LlmConfig",
     "LogConfig",
     "SecurityConfig",
     "ConfigManager",
@@ -117,6 +111,7 @@ __all__ = [
     "SessionGroup",
     "ValidationResult",
     "PublishResult",
+    "Workflow",
     # 抽象接口
     "Authenticator",
     "Downloader",

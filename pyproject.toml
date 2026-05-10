@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "cli",
+    "pillow>=12.2.0",
 ]
 license = { text = "MIT" }
 authors = [
@@ -40,6 +41,7 @@ validator = { workspace = true }
 publisher = { workspace = true }
 cli = { workspace = true }
 api = { workspace = true }
+sites = { workspace = true }
 
 # Development dependencies (shared across workspace)
 [dependency-groups]
@@ -120,18 +122,4 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 
-[tool.kaitian]
-# Default configuration for KaiTian
-[tool.kaitian.database]
-path = "./data/kaitian.db"
 
-[tool.kaitian.browser]
-headless = true
-timeout = 30000
-user_data_dir = "./data/browser"
-
-[tool.kaitian.download]
-concurrent = 3
-chunk_size = "1MB"
-retry_times = 3
-output_dir = "./downloads"

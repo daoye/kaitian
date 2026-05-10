@@ -168,15 +168,17 @@ class TestAuthManager:
         """测试不支持的站点."""
         import asyncio
 
+        browser_manager = DummyBrowserManager()
         with pytest.raises(SiteNotSupportedError):
-            asyncio.run(manager.login("unsupported", "user", {}))
+            asyncio.run(manager.login("unsupported", "user", {}, browser_manager))
 
     def test_logout_nonexistent_session(self, manager):
         """测试登出不存在的会话."""
         import asyncio
 
+        browser_manager = DummyBrowserManager()
         # 应该返回 True（幂等）
-        result = asyncio.run(manager.logout("znzmo", "nonexistent"))
+        result = asyncio.run(manager.logout("znzmo", "nonexistent", browser_manager))
         assert result is True
 
     def test_open_site_uses_session(self, manager):

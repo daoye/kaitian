@@ -45,16 +45,19 @@ async with manager:
     content = await page.content()
 ```
 
+**运行时兼容性**：
+
+- `rebrowser-playwright` 仅替换浏览器运行时分发包，`playwright.*` API 保持不变
+- `BrowserManager` 仍然使用 `playwright.async_api` 导入方式，无需额外适配代码
+- `BrowserManager` 在 `chromium` 模式下默认优先启动系统 Chrome，不走 Playwright 自带浏览器
+
 ## CLI 使用
 
 KaiTian CLI 支持通过命令行控制 CDP 模式：
 
 ```bash
-# 启用 CDP，使用默认端口
+# 启用 CDP 模式
 uv run kaitian auth login --site znzmo --account test --enable-cdp --no-headless
-
-# 启用 CDP，指定端口
-uv run kaitian auth login --site znzmo --account test --enable-cdp --cdp-port 9223 --no-headless
 
 # 默认不启用 CDP；需要时显式传入 --enable-cdp
 uv run kaitian auth login --site znzmo --account test --no-headless
@@ -62,8 +65,7 @@ uv run kaitian auth login --site znzmo --account test --no-headless
 
 **CLI 参数说明**：
 
-- `--enable-cdp`：控制是否启用 Chrome DevTools Protocol
-- `--cdp-port`：指定 CDP 端口（可选，默认 9222）
+- `--enable-cdp`：控制是否启用 CDP 模式（开启远程调试端口，供外部工具连接）
 - `--headless` / `--no-headless`：控制是否无头模式（CDP 模式通常需要 `--no-headless`）
 
 **连接到 CDP**：
@@ -73,12 +75,6 @@ uv run kaitian auth login --site znzmo --account test --no-headless
 1. 打开 Chrome DevTools：在浏览器地址栏输入 `chrome://inspect`
 2. 或者直接访问：`http://localhost:9222/json`
 3. 点击对应的会话进行调试
-
-**运行时兼容性**：
-
-- `rebrowser-playwright` 仅替换浏览器运行时分发包，`playwright.*` API 保持不变
-- `BrowserManager` 仍然使用 `playwright.async_api` 导入方式，无需额外适配代码
-- `BrowserManager` 在 `chromium` 模式下默认优先启动系统 Chrome，不走 Playwright 自带浏览器
 
 ## 核心 API
 
@@ -155,9 +151,90 @@ class ManagedBrowserContext:
     ) -> None
     """设置额外的 HTTP 请求头"""
 
+    async def new_cdp_session(
+        self,
+        page: ManagedPage | None = None
+    ) -> ManagedCdpSession
+    """创建 CDP 会话，用于发送原生 Chrome DevTools Protocol 命令"""
+
     async def close(self) -> None
     """关闭上下文，幂等操作"""
 ```
+
+### ManagedPage
+
+托管的浏览器页面，支持 CDP 操作。
+
+```python
+class ManagedPage:
+    @property
+    def raw(self) -> Any
+    """获取原始 Playwright 页面对象"""
+
+    async def new_cdp_session(self) -> ManagedCdpSession
+    """创建页面级别的 CDP 会话"""
+
+    async def close(self) -> None
+    """关闭页面"""
+```
+
+### ManagedCdpSession
+
+CDP 会话，用于发送原生 Chrome DevTools Protocol 命令。
+
+```python
+class ManagedCdpSession:
+    async def send(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None
+    ) -> dict[str, Any]
+    """发送 CDP 命令"""
+
+    async def detach(self) -> None
+    """分离 CDP 会话"""
+
+    @property
+    def raw(self) -> Any
+    """获取原始 CDP 会话对象"""
+```
+
+**CDP 使用示例**：
+
+```python
+# 创建浏览器级别的 CDP 会话
+cdp_session = await browser_manager.new_browser_cdp_session()
+
+# 获取浏览器版本
+result = await cdp_session.send("Browser.getVersion")
+print(result["product"])  # Chrome/xx.x.xxxx.xx
+
+# 分离会话
+await cdp_session.detach()
+
+# 在页面中创建 CDP 会话
+page = await context.new_page()
+page_cdp = await page.new_cdp_session()
+
+# 使用 Runtime.evaluate 在页面中执行 JavaScript
+result = await page_cdp.send("Runtime.evaluate", {
+    "expression": "window.location.href"
+})
+print(result["result"]["value"])
+
+# 启用网络监控
+await page_cdp.send("Network.enable")
+
+# 分离会话
+await page_cdp.detach()
+```
+
+**使用场景**：
+- 执行原生 JavaScript（通过 `Runtime.evaluate`）
+- 监控网络请求（通过 `Network` 域）
+- 性能分析（通过 `Performance` 域）
+- 调试 DOM（通过 `DOM` 域）
+- 模拟设备（通过 `Emulation` 域）
 
 ### 数据模型
 
@@ -170,35 +247,33 @@ class BrowserLaunchOptions:
     headless: bool = True                    # 是否无头模式
     timeout_ms: int = 30000                  # 启动超时（毫秒）
     slow_mo_ms: int = 0                      # 慢速模式（毫秒）
-    enable_cdp: bool = False                 # 是否启用 Chrome DevTools Protocol
-    cdp_port: int | None = None              # Chrome DevTools Protocol 端口（默认 9222）
+    enable_cdp: bool = False                 # 启用 CDP 模式（开启远程调试端口）
     launch_args: list[str] = []              # 额外启动参数
     proxy: dict[str, str] | None = None      # 代理配置
 ```
 
-**Chrome DevTools Protocol (CDP) 模式**
+**CDP 模式说明**：
 
-启用 CDP 模式后，浏览器将开启远程调试端口，允许外部工具（如 Chrome DevTools、Puppeteer）连接。
+当 `enable_cdp=True` 时，浏览器会开启远程调试端口（默认 9222），允许外部工具（如 Chrome DevTools、Puppeteer）连接。这在以下场景很有用：
+
+- 开发调试：使用 Chrome DevTools 连接并调试浏览器
+- 远程控制：允许其他工具通过 CDP 协议控制浏览器
+- 性能分析：使用外部工具监控浏览器性能
 
 ```python
-# 启用 CDP，使用默认端口 9222
+# 启用 CDP 模式
 launch_options = BrowserLaunchOptions(
     enable_cdp=True,
     headless=False,  # CDP 模式通常需要非无头模式
 )
-
-# 启用 CDP，指定端口
-launch_options = BrowserLaunchOptions(
-    enable_cdp=True,
-    cdp_port=9223,
-    headless=False,
-)
 ```
 
-**使用场景**：
-- 开发调试：使用 Chrome DevTools 连接到浏览器
-- 自动化测试：使用 CDP 协议进行高级控制
-- 性能分析：监控浏览器性能指标
+连接方式：
+1. 打开 Chrome DevTools：在浏览器地址栏输入 `chrome://inspect`
+2. 或者直接访问：`http://localhost:9222/json`
+3. 点击对应的会话进行调试
+
+**注意**：Playwright 的 `new_cdp_session()` 方法始终可用，无需启用 `enable_cdp`。`enable_cdp` 仅控制是否开启远程调试端口供外部工具连接。
 
 #### BrowserContextOptions
 

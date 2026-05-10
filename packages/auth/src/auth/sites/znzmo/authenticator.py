@@ -17,7 +17,6 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Optional, cast
 from unittest.mock import AsyncMock, Mock
 
-from browser import BrowserManager, BrowserLaunchOptions
 from browser.exceptions import BrowserError, BrowserLaunchError
 from core.models import Authenticator, Session
 
@@ -97,9 +96,6 @@ class ZnzmoAuthenticator(Authenticator):
         selectors: Optional[Dict[str, str]] = None,
         stealth_hook: Optional[Callable] = None,
         verification_code_provider: Optional[VerificationCodeProvider] = None,
-        headless: bool = True,
-        enable_cdp: bool = False,
-        cdp_port: int | None = None,
     ):
         """初始化认证适配器.
 
@@ -111,20 +107,10 @@ class ZnzmoAuthenticator(Authenticator):
         """
         self._captcha_solver = captcha_solver
         self._timeout = timeout
-        self._enable_cdp = enable_cdp
-        self._cdp_port = cdp_port
         self._selectors = {**self.DEFAULT_SELECTORS, **(selectors or {})}
         self._stealth_hook = stealth_hook
         self._verification_code_provider = (
             verification_code_provider or ConsoleVerificationCodeProvider()
-        )
-        self._browser_manager = BrowserManager(
-            launch_options=BrowserLaunchOptions(
-                headless=headless,
-                enable_cdp=enable_cdp,
-                cdp_port=cdp_port,
-            ),
-            stealth_hook=stealth_hook,
         )
 
     def _get_selector(self, key: str) -> str:
@@ -625,11 +611,16 @@ class ZnzmoAuthenticator(Authenticator):
                 details={"original_error": str(exc), "context": context},
             )
 
-    async def login(self, credentials: Dict[str, Any]) -> Session:
+    async def login(
+        self,
+        credentials: Dict[str, Any],
+        browser_manager: Any,
+    ) -> Session:
         """执行知末网登录.
 
         Args:
             credentials: 包含 username 和 password 的字典
+            browser_manager: 浏览器管理器实例
 
         Returns:
             登录成功后的 Session 对象
@@ -657,25 +648,11 @@ class ZnzmoAuthenticator(Authenticator):
         page = None
 
         try:
-            # 启动浏览器
-            try:
-                await self._browser_manager.start()
-            except Exception as exc:
-                mapped_exc = self._map_browser_exception(exc, "browser_start")
-                logger.error(
-                    "auth.znzmo.login.failed",
-                    extra={
-                        "reason": "browser_start_failed",
-                        "error": str(exc),
-                    },
-                )
-                raise mapped_exc from exc
-
             # 创建上下文和页面
             try:
                 from browser import BrowserContextOptions
 
-                context = await self._browser_manager.new_context(
+                context = await browser_manager.new_context(
                     BrowserContextOptions(base_url=self.BASE_URL)
                 )
                 page = await context.new_page()
@@ -935,7 +912,11 @@ class ZnzmoAuthenticator(Authenticator):
                 data={"error": str(exc), "type": type(exc).__name__},
             )
 
-    async def logout(self, session: Session) -> bool:
+    async def logout(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> bool:
         """执行登出.
 
         Args:
@@ -955,12 +936,10 @@ class ZnzmoAuthenticator(Authenticator):
         page = None
 
         try:
-            await self._browser_manager.start()
-
             # 创建新上下文并设置 cookies
             from browser import BrowserContextOptions
 
-            context = await self._browser_manager.new_context(
+            context = await browser_manager.new_context(
                 BrowserContextOptions(
                     base_url=self.BASE_URL,
                     storage_state=None,  # 空状态，手动设置 cookies
@@ -996,7 +975,11 @@ class ZnzmoAuthenticator(Authenticator):
             await self._close_page_safely(page)
             await self._close_context_safely(context)
 
-    async def refresh(self, session: Session) -> Session:
+    async def refresh(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> Session:
         """刷新会话.
 
         知末网不支持真正的刷新，这里验证会话是否有效。
@@ -1015,7 +998,7 @@ class ZnzmoAuthenticator(Authenticator):
             logger.warning("auth.znzmo.refresh.session_already_expired")
             raise SessionExpiredError("Session has already expired")
 
-        is_valid = await self.verify(session)
+        is_valid = await self.verify(session, browser_manager)
 
         if not is_valid:
             logger.warning("auth.znzmo.refresh.session_invalid")
@@ -1035,7 +1018,11 @@ class ZnzmoAuthenticator(Authenticator):
 
         return session
 
-    async def verify(self, session: Session) -> bool:
+    async def verify(
+        self,
+        session: Session,
+        browser_manager: Any,
+    ) -> bool:
         """验证会话是否有效.
 
         通过访问个人中心页面并检查是否需要登录来判断。
@@ -1059,14 +1046,12 @@ class ZnzmoAuthenticator(Authenticator):
         page = None
 
         try:
-            await self._browser_manager.start()
-
             # 创建新上下文并设置 cookies
             from browser import BrowserContextOptions
 
             cookie_domain = session.metadata.get("cookie_domain", ".znzmo.com")
 
-            context = await self._browser_manager.new_context(
+            context = await browser_manager.new_context(
                 BrowserContextOptions(
                     base_url=self.BASE_URL,
                     storage_state=None,
@@ -1119,19 +1104,3 @@ class ZnzmoAuthenticator(Authenticator):
         finally:
             await self._close_page_safely(page)
             await self._close_context_safely(context)
-
-    async def close(self) -> None:
-        """关闭浏览器管理器."""
-        try:
-            await self._browser_manager.close()
-            logger.debug("auth.znzmo.authenticator.closed")
-        except Exception as e:
-            logger.debug("auth.znzmo.authenticator.close_error", extra={"error": str(e)})
-
-    async def __aenter__(self) -> "ZnzmoAuthenticator":
-        """异步进入上下文."""
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        """异步退出上下文，确保资源清理."""
-        await self.close()
