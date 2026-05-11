@@ -2,16 +2,18 @@ import importlib
 from pathlib import Path
 
 import typer
+from core import get_config
 
 from cli.__version__ import __version__
 from cli.commands.auth import router as auth_router
 from cli.commands.crawl import router as crawl_router
+from cli.commands.publish import router as publish_router
 from cli.commands.record import router as record_router
-from core import get_config
 
 app = typer.Typer(help="KaiTian 模块化采集工具")
 app.add_typer(auth_router, name="auth")
 app.add_typer(crawl_router, name="crawl")
+app.add_typer(publish_router, name="publish")
 app.add_typer(record_router, name="record")
 
 

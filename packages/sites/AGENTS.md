@@ -17,7 +17,8 @@ from sites.{site} import parsers
 register("{site}", parsers)
 ```
 
-### 当前站点
+### 站点模块
 | 站点 | 模块 | 说明 |
 |------|------|------|
-| three_dbrute | `sites.three_dbrute` | WordPress AJAX 列表 + S3 CDN 下载 |
+| three_dbrute | `sites.three_dbrute` | parsers/listing/download/agent(get_nonce) |
+| znzmo | `sites.znzmo` | upload_agent（LLM 分析 + MCP 上传） |

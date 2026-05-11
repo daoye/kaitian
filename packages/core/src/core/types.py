@@ -45,18 +45,13 @@ class LogLevel(Enum):
 
 
 class WorkflowStep(StrEnum):
-    """通用下载步骤枚举。
+    """通用工作流步骤枚举。
 
-    适用于任意网站的下载流程，按执行顺序排列：
-    pending → fetching → meta_extracted → file_downloaded
-    → previews_downloaded → processing → completed
+    适用于下载、上传、发布等任意工作流：
+    pending → running → completed
     """
     PENDING = "pending"
-    FETCHING = "fetching"
-    META_EXTRACTED = "meta_extracted"
-    FILE_DOWNLOADED = "file_downloaded"
-    PREVIEWS_DOWNLOADED = "previews_downloaded"
-    PROCESSING = "processing"
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
 

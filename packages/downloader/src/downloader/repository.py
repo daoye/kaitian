@@ -1,6 +1,7 @@
-"""下载记录 SQLite 持久化。
+"""任务记录 SQLite 持久化。
 
-以站点为维度记录下载进度，每个站点下管理多个 URL。
+通用工作流记录，支持下载、上传、发布等场景。
+以 (site, source_url) 为唯一键管理任务进度。
 """
 
 import sqlite3
@@ -19,11 +20,12 @@ class InvalidStepError(KaitianError):
     pass
 
 
-class SiteRepository:
-    """站点下载记录仓库。
+class RecordRepository:
+    """通用任务记录仓库。
 
-    以站点为维度组织记录。每个站点下管理多个 URL 的下载进度。
-    URL 在同一站点内唯一。
+    以 (site, source_url) 为唯一键管理任意工作流进度。
+    site 标识任务类型/目标平台（如 "3dbrute.com", "znzmo"）。
+    source_url 标识具体任务对象（如下载 URL、本地目录路径）。
     """
 
     def __init__(self, db_path: str = "./data/kaitian.db"):
@@ -39,22 +41,22 @@ class SiteRepository:
     def _init_db(self) -> None:
         conn = self._connect()
         try:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS site_records (
+            conn.executescript(f"""
+                CREATE TABLE IF NOT EXISTS records (
                     id TEXT PRIMARY KEY,
                     site TEXT NOT NULL,
                     source_url TEXT NOT NULL,
                     name TEXT,
-                    step TEXT NOT NULL DEFAULT 'initial',
-                    status TEXT NOT NULL DEFAULT 'pending',
+                    step TEXT NOT NULL DEFAULT '{WorkflowStep.PENDING}',
+                    status TEXT NOT NULL DEFAULT '{WorkflowStatus.PENDING}',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_site_records_site
-                    ON site_records(site);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_site_records_url
-                    ON site_records(site, source_url);
+                CREATE INDEX IF NOT EXISTS idx_records_site
+                    ON records(site);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_records_url
+                    ON records(site, source_url);
             """)
             conn.commit()
         finally:
@@ -64,36 +66,38 @@ class SiteRepository:
         self,
         site: str,
         source_url: str,
-        step: str = "pending",
+        step: WorkflowStep | str = WorkflowStep.PENDING,
         name: str | None = None,
-        status: str = "running",
+        status: WorkflowStatus | str = WorkflowStatus.RUNNING,
     ) -> Workflow:
-        """在指定站点下记录或更新一个 URL 的下载进度。同站点同 URL 自动更新。
+        """记录或更新任务进度。同 site + source_url 自动更新。
 
         Raises:
             InvalidStepError: step 不在预定义列表中
         """
         self._validate_step(step)
+        step_str = step.value if isinstance(step, WorkflowStep) else step
+        status_str = status.value if isinstance(status, WorkflowStatus) else status
         now = datetime.utcnow().isoformat()
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT * FROM site_records WHERE site = ? AND source_url = ?",
+                "SELECT * FROM records WHERE site = ? AND source_url = ?",
                 (site, source_url),
             ).fetchone()
             if row:
                 conn.execute(
-                    "UPDATE site_records SET step=?, status=?, name=COALESCE(?,name), updated_at=? WHERE site=? AND source_url=?",
-                    (step, status, name, now, site, source_url),
+                    "UPDATE records SET step=?, status=?, name=COALESCE(?,name), updated_at=? WHERE site=? AND source_url=?",
+                    (step_str, status_str, name, now, site, source_url),
                 )
             else:
                 conn.execute(
-                    "INSERT INTO site_records (id, site, source_url, name, step, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
-                    (uuid.uuid4().hex[:16], site, source_url, name, step, status, now, now),
+                    "INSERT INTO records (id, site, source_url, name, step, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (uuid.uuid4().hex[:16], site, source_url, name, step_str, status_str, now, now),
                 )
             conn.commit()
             row = conn.execute(
-                "SELECT * FROM site_records WHERE site = ? AND source_url = ?",
+                "SELECT * FROM records WHERE site = ? AND source_url = ?",
                 (site, source_url),
             ).fetchone()
             return self._row_to_workflow(row)
@@ -101,22 +105,27 @@ class SiteRepository:
             conn.close()
 
     def get(self, site: str, source_url: str) -> Workflow | None:
-        """查询指定站点下某个 URL 的进度。"""
+        """查询指定任务的进度。"""
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT * FROM site_records WHERE site = ? AND source_url = ?",
+                "SELECT * FROM records WHERE site = ? AND source_url = ?",
                 (site, source_url),
             ).fetchone()
             return self._row_to_workflow(row) if row else None
         finally:
             conn.close()
 
+    def is_completed(self, site: str, source_url: str) -> bool:
+        """检查任务是否已完成。"""
+        record = self.get(site, source_url)
+        return record is not None and record.status == WorkflowStatus.COMPLETED
+
     def list(self, site: str, status: str | None = None, limit: int = 200) -> list[Workflow]:
-        """列出指定站点下的所有 URL 记录。"""
+        """列出指定 site 下的所有任务记录。"""
         conn = self._connect()
         try:
-            query = "SELECT * FROM site_records WHERE site = ?"
+            query = "SELECT * FROM records WHERE site = ?"
             params: list[Any] = [site]
             if status:
                 query += " AND status = ?"
@@ -129,50 +138,50 @@ class SiteRepository:
             conn.close()
 
     def status(self, site: str) -> dict:
-        """返回指定站点的汇总统计。"""
+        """返回指定 site 的任务汇总统计。"""
         conn = self._connect()
         try:
             total = conn.execute(
-                "SELECT COUNT(*) as cnt FROM site_records WHERE site = ?", (site,)
+                "SELECT COUNT(*) as cnt FROM records WHERE site = ?", (site,)
             ).fetchone()["cnt"]
             rows = conn.execute(
-                "SELECT status, COUNT(*) as cnt FROM site_records WHERE site = ? GROUP BY status",
+                "SELECT status, COUNT(*) as cnt FROM records WHERE site = ? GROUP BY status",
                 (site,),
             ).fetchall()
             counts = {r["status"]: r["cnt"] for r in rows}
             return {
                 "site": site,
                 "total": total,
-                "completed": counts.get("completed", 0),
-                "running": counts.get("running", 0),
-                "failed": counts.get("failed", 0),
-                "pending": counts.get("pending", 0),
+                "completed": counts.get(WorkflowStatus.COMPLETED, 0),
+                "running": counts.get(WorkflowStatus.RUNNING, 0),
+                "failed": counts.get(WorkflowStatus.FAILED, 0),
+                "pending": counts.get(WorkflowStatus.PENDING, 0),
             }
         finally:
             conn.close()
 
     def done(self, site: str, source_url: str) -> Workflow | None:
-        """标记指定站点下某 URL 为已完成。"""
+        """标记任务为已完成。"""
         now = datetime.utcnow().isoformat()
         conn = self._connect()
         try:
             conn.execute(
-                "UPDATE site_records SET step='completed', status='completed', updated_at=? WHERE site=? AND source_url=?",
-                (now, site, source_url),
+                "UPDATE records SET step=?, status=?, updated_at=? WHERE site=? AND source_url=?",
+                (WorkflowStep.COMPLETED.value, WorkflowStatus.COMPLETED.value, now, site, source_url),
             )
             conn.commit()
             return self.get(site, source_url)
         finally:
             conn.close()
 
-    def fail(self, site: str, source_url: str, step: str) -> Workflow | None:
-        """标记指定站点下某 URL 为失败。"""
+    def fail(self, site: str, source_url: str, step: WorkflowStep) -> Workflow | None:
+        """标记任务为失败。"""
         now = datetime.utcnow().isoformat()
         conn = self._connect()
         try:
             conn.execute(
-                "UPDATE site_records SET step=?, status='failed', updated_at=? WHERE site=? AND source_url=?",
-                (step, now, site, source_url),
+                "UPDATE records SET step=?, status=?, updated_at=? WHERE site=? AND source_url=?",
+                (step.value, WorkflowStatus.FAILED.value, now, site, source_url),
             )
             conn.commit()
             return self.get(site, source_url)
@@ -180,11 +189,11 @@ class SiteRepository:
             conn.close()
 
     def remove(self, site: str, source_url: str) -> bool:
-        """删除指定站点下某 URL 的记录。"""
+        """删除指定任务记录。"""
         conn = self._connect()
         try:
             cursor = conn.execute(
-                "DELETE FROM site_records WHERE site = ? AND source_url = ?",
+                "DELETE FROM records WHERE site = ? AND source_url = ?",
                 (site, source_url),
             )
             conn.commit()
@@ -193,30 +202,30 @@ class SiteRepository:
             conn.close()
 
     def list_sites(self) -> list[dict]:
-        """列出所有有记录的站点及统计。"""
+        """列出所有有记录的 site 及统计。"""
         conn = self._connect()
         try:
-            rows = conn.execute("""
+            rows = conn.execute(f"""
                 SELECT site,
                        COUNT(*) as total,
-                       SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
-                       SUM(CASE WHEN status='running' THEN 1 ELSE 0 END) as running,
-                       SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
-                FROM site_records
+                       SUM(CASE WHEN status=? THEN 1 ELSE 0 END) as completed,
+                       SUM(CASE WHEN status=? THEN 1 ELSE 0 END) as running,
+                       SUM(CASE WHEN status=? THEN 1 ELSE 0 END) as failed
+                FROM records
                 GROUP BY site
                 ORDER BY total DESC
-            """).fetchall()
+            """, (WorkflowStatus.COMPLETED, WorkflowStatus.RUNNING, WorkflowStatus.FAILED)).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
 
-    def _validate_step(self, step: str) -> None:
-        if step in ("completed", "failed"):
-            return  # done/fail 命令使用，允许
+    def _validate_step(self, step: WorkflowStep | str) -> None:
+        if isinstance(step, WorkflowStep):
+            return
         try:
             WorkflowStep(step)
         except ValueError:
-            valid = WorkflowStep.valid_steps()
+            valid = [s.value for s in WorkflowStep]
             raise InvalidStepError(
                 f"无效步骤 '{step}'，有效值: {', '.join(valid)}"
             ) from None
@@ -232,3 +241,6 @@ class SiteRepository:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+
+

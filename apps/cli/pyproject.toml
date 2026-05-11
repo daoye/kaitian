@@ -12,6 +12,7 @@ dependencies = [
     "downloader",
     "validator",
     "publisher",
+    "sites",
 ]
 
 [project.scripts]

@@ -69,6 +69,16 @@ class CrawlConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KAITIAN_CRAWL_")
 
 
+class PublishConfig(BaseSettings):
+    """发布配置"""
+
+    scan_interval_minutes: int = Field(
+        default=60, description="守护模式扫描间隔（分钟）"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="KAITIAN_PUBLISH_")
+
+
 class LlmConfig(BaseSettings):
     """LLM 配置"""
 
@@ -164,6 +174,7 @@ class CoreConfig(BaseSettings):
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
+    publish: PublishConfig = Field(default_factory=PublishConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
     log: LogConfig = Field(default_factory=LogConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)

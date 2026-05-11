@@ -1,4 +1,4 @@
-"""通过 BrowserOS MCP 获取 download nonce — LangGraph 工作流。"""
+"""3dbrute 智能体 — 通过 BrowserOS MCP 获取 download nonce。"""
 
 from typing import Any
 
@@ -16,28 +16,7 @@ class NonceState(TypedDict):
     account: str
 
 
-def _parse_pages(result: Any) -> list[dict]:
-    """解析 list_pages 返回的页面列表。"""
-    import re
-    text = _extract_text_content(result)
-    pages = []
-    lines = text.split("\n")
-    i = 0
-    while i < len(lines):
-        m = re.match(r"\s*(\d+)\.\s+(.+?)\s+\(tab\s+\d+\)", lines[i])
-        if m:
-            page_id = int(m.group(1))
-            title = m.group(2).strip()
-            url = lines[i + 1].strip() if i + 1 < len(lines) else ""
-            pages.append({"id": page_id, "title": title, "url": url})
-            i += 2
-        else:
-            i += 1
-    return pages
-
-
-def _extract_text_content(result: Any) -> str:
-    """从 MCP 工具返回的内容中提取纯文本值。"""
+def _extract_text(result: Any) -> str:
     if isinstance(result, list):
         for block in result:
             if isinstance(block, dict) and block.get("type") == "text":
@@ -48,24 +27,26 @@ def _extract_text_content(result: Any) -> str:
     return str(result).strip() if result else ""
 
 
-def _extract_page_id(result: Any) -> int | None:
-    """从 MCP 工具返回的内容中提取页面 ID。"""
+def _parse_pages(result: Any) -> list[dict]:
     import re
-    if isinstance(result, list):
-        for block in result:
-            if isinstance(block, dict) and block.get("type") == "text":
-                m = re.search(r"Page ID:\s*(\d+)", block.get("text", ""))
-                if m:
-                    return int(m.group(1))
-    elif isinstance(result, str):
-        m = re.search(r"Page ID:\s*(\d+)", result)
-        if m:
-            return int(m.group(1))
-    return None
+    text = _extract_text(result)
+    pages = []
+    for m in re.finditer(r"\s*(\d+)\.\s+(.+?)\s+\(tab\s+(\d+)\)\s*\n\s*(https?://\S+)", text):
+        pages.append({"id": int(m.group(1)), "title": m.group(2).strip(), "url": m.group(4).strip()})
+    if not pages:
+        for m in re.finditer(r"\s*(\d+)\.\s+(.+?)\s+\(tab\s+(\d+)\)", text):
+            pages.append({"id": int(m.group(1)), "title": m.group(2).strip(), "url": ""})
+    return pages
+
+
+def _extract_page_id(result: Any) -> int | None:
+    import re
+    text = _extract_text(result)
+    m = re.search(r"Page ID:\s*(\d+)", text)
+    return int(m.group(1)) if m else None
 
 
 async def connect_mcp(state: NonceState) -> NonceState:
-    """连接 BrowserOS MCP。"""
     try:
         from langchain_mcp_adapters.client import StreamableHttpConnection
         from langchain_mcp_adapters.tools import load_mcp_tools
@@ -78,7 +59,6 @@ async def connect_mcp(state: NonceState) -> NonceState:
 
 
 async def navigate_and_extract(state: NonceState) -> NonceState:
-    """导航到网站并提取 nonce。"""
     if state.get("error"):
         return state
     tools = state.get("tools")
@@ -94,13 +74,12 @@ async def navigate_and_extract(state: NonceState) -> NonceState:
         return {**state, "error": "MCP 工具不完整"}
 
     try:
-        # 1. 查找已有页面或打开新页面
         pages_result = await list_p.ainvoke({})
         all_pages = _parse_pages(pages_result)
         existing = [p for p in all_pages if "3dbrute.com" in p.get("url", "")]
         if existing:
             page_id = existing[0]["id"]
-            nav_result = await navigate.ainvoke({"page": page_id, "url": "https://3dbrute.com/?type=free"})
+            await navigate.ainvoke({"page": page_id, "url": "https://3dbrute.com/?type=free"})
         else:
             new_page = tool_map.get("new_page")
             if not new_page:
@@ -110,23 +89,54 @@ async def navigate_and_extract(state: NonceState) -> NonceState:
         if not page_id:
             return {**state, "error": f"无法获取页面 ID: {nav_result}"}
 
-        # 2. 检查登录
-        logged_in = await evaluate.ainvoke({
-            "page": page_id,
-            "expression": "document.body.classList.contains('logged-in')",
-        })
-        logged_val = _extract_text_content(logged_in)
-        if logged_val != "true":
-            return {**state, "error": "未登录"}
+        import asyncio
 
-        # 3. 提取 nonce
-        nonce_val = await evaluate.ainvoke({
+        # 等待页面加载完成（最多 10 秒）
+        await evaluate.ainvoke({
             "page": page_id,
-            "expression": "window.nonce_download_nonce",
+            "expression": """
+                new Promise(resolve => {
+                    if (document.readyState === 'complete') resolve('ready');
+                    else window.addEventListener('load', () => resolve('ready'));
+                    setTimeout(() => resolve('timeout'), 10000);
+                })
+            """,
         })
-        nonce = _extract_text_content(nonce_val)
+
+        # 轮询等待 nonce 出现（网页可能有 AJAX 延迟加载）
+        nonce = None
+        for attempt in range(10):  # 最多重试 10 次
+            # 检查登录状态（多种方式）
+            logged_in = await evaluate.ainvoke({
+                "page": page_id,
+                "expression": """
+                    (() => {
+                        if (document.body && document.body.classList.contains('logged-in')) return 'true';
+                        if (document.querySelector('.my-account, .logout, [href*="logout"]')) return 'true';
+                        if (window.nonce_download_nonce) return 'true';
+                        return 'false';
+                    })()
+                """,
+            })
+            logged_val = _extract_text(logged_in)
+
+            if logged_val == "true":
+                nonce_val = await evaluate.ainvoke({
+                    "page": page_id,
+                    "expression": "window.nonce_download_nonce",
+                })
+                nonce = _extract_text(nonce_val)
+                if nonce:
+                    break
+
+            if attempt < 9:
+                await asyncio.sleep(1)
+
+        if logged_val != "true":
+            return {**state, "error": "未登录，请先通过 BrowserOS 登录 3dbrute.com"}
+
         if not nonce:
-            return {**state, "error": "未找到 nonce"}
+            return {**state, "error": "未找到 nonce，请确保页面完全加载后再试"}
 
         return {**state, "nonce": nonce, "page_id": page_id}
     except Exception as e:
@@ -134,7 +144,6 @@ async def navigate_and_extract(state: NonceState) -> NonceState:
 
 
 async def save_nonce(state: NonceState) -> NonceState:
-    """保存 nonce。"""
     if state.get("error") or not state.get("nonce"):
         return state
 

@@ -51,6 +51,7 @@ apps/
 | `crawl postprocess <dir>` | 后处理（解压/转格式） |
 | `crawl agent text_clean --model-dir <dir>` | LLM 文本清洗 |
 | `record check/set/list/done` | 下载进度管理 |
+| `publish znzmo <model-dir>` | 上传模型到知末（BrowserOS） |
 
 ### 非目标
 分布式架构 / Redis / MQ / 权限系统 / 多租户 / 插件系统

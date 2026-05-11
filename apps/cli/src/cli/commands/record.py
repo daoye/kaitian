@@ -6,8 +6,8 @@
 
 import typer
 from core import get_config
-from core.types import WorkflowStep
-from downloader.repository import InvalidStepError, SiteRepository
+from core.types import WorkflowStatus, WorkflowStep
+from downloader.repository import InvalidStepError, RecordRepository
 from rich.console import Console
 from rich.table import Table
 
@@ -32,7 +32,7 @@ def set(
     db_path: str = typer.Option(None, "--db-path", callback=lambda p: p or _db_path()),
 ):
     """在指定站点下记录或更新一个 URL 的下载进度。"""
-    repo = SiteRepository(db_path)
+    repo = RecordRepository(db_path)
     try:
         wf = repo.set(site=site, source_url=url, step=step, name=name)
     except InvalidStepError as e:
@@ -49,7 +49,7 @@ def check(
     db_path: str = typer.Option(None, "--db-path", callback=lambda p: p or _db_path()),
 ):
     """查询指定站点下某个 URL 的下载进度。"""
-    repo = SiteRepository(db_path)
+    repo = RecordRepository(db_path)
     wf = repo.get(site, url)
     if wf is None:
         console.print(f"[yellow]未找到记录:[/yellow] [{site}] {url}")
@@ -69,7 +69,7 @@ def list(
     db_path: str = typer.Option(None, "--db-path", callback=lambda p: p or _db_path()),
 ):
     """列出指定站点下的所有 URL 记录。"""
-    repo = SiteRepository(db_path)
+    repo = RecordRepository(db_path)
     records = repo.list(site, status=status, limit=limit)
     if not records:
         console.print(f"[yellow]站点 '{site}' 下无记录[/yellow]")
@@ -80,7 +80,11 @@ def list(
     table.add_column("步骤")
     table.add_column("状态")
     for r in records:
-        style = {"completed": "green", "failed": "red", "running": "blue"}.get(r.status.value, "white")
+        style = {
+            WorkflowStatus.COMPLETED: "green",
+            WorkflowStatus.FAILED: "red",
+            WorkflowStatus.RUNNING: "blue",
+        }.get(r.status, "white")
         short_url = r.source_url[:60] + "..." if len(r.source_url) > 60 else r.source_url
         table.add_row(
             r.name or "-", short_url,
@@ -97,7 +101,7 @@ def status(
     db_path: str = typer.Option(None, "--db-path", callback=lambda p: p or _db_path()),
 ):
     """查看指定站点的下载进度统计。"""
-    repo = SiteRepository(db_path)
+    repo = RecordRepository(db_path)
     s = repo.status(site)
     if s["total"] == 0:
         console.print(f"[yellow]站点 '{site}' 暂无记录[/yellow]")
@@ -124,7 +128,7 @@ def sites(
     db_path: str = typer.Option(None, "--db-path", callback=lambda p: p or _db_path()),
 ):
     """列出所有有下载记录的站点。"""
-    repo = SiteRepository(db_path)
+    repo = RecordRepository(db_path)
     all_sites = repo.list_sites()
     if not all_sites:
         console.print("[yellow]暂无站点记录[/yellow]")
@@ -152,7 +156,7 @@ def done(
     db_path: str = typer.Option(None, "--db-path", callback=lambda p: p or _db_path()),
 ):
     """标记指定站点下某 URL 为已完成。"""
-    repo = SiteRepository(db_path)
+    repo = RecordRepository(db_path)
     wf = repo.done(site, url)
     if wf:
         console.print(f"[green]已标记完成:[/green] [{site}] {url}")
@@ -167,7 +171,7 @@ def remove(
     db_path: str = typer.Option(None, "--db-path", callback=lambda p: p or _db_path()),
 ):
     """删除指定站点下某 URL 的记录。"""
-    repo = SiteRepository(db_path)
+    repo = RecordRepository(db_path)
     if repo.remove(site, url):
         console.print(f"[green]已删除:[/green] [{site}] {url}")
     else:

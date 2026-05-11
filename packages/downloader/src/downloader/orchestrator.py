@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 
 from core.config import get_config
+from core.types import WorkflowStatus
 from sites.three_dbrute.listing import ListingFetcher
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ class CrawlOrchestrator:
     Args:
         cookies: 登录 cookie。
         process_model: 处理单个模型的回调函数，接收 (url, title, post_id)。
-                        返回 True 表示成功，False 表示失败，None 表示已跳过。
+                        返回 True 表示成功下载，False/None 表示跳过（不计数）。
         delay: 请求间隔秒数。
     """
 
@@ -32,14 +33,14 @@ class CrawlOrchestrator:
         self.config = get_config().crawl
 
     def run_batch(self, limit: int = 20, start_page: int = 1) -> int:
-        """批量模式：处理 limit 个模型后退出。返回处理数。"""
+        """批量模式：成功下载 limit 个模型后退出。返回成功下载数。"""
         count = 0
         for cards, _page, _total in self.fetcher.iter_pages(start=start_page):
             for card in cards:
                 if count >= limit:
                     return count
                 result = self.process_model(card["url"], card["title"], card["post_id"])
-                if result is not None:
+                if result is True:
                     count += 1
                 time.sleep(self.delay)
         return count
@@ -69,11 +70,11 @@ class CrawlOrchestrator:
             return
 
         newest_url = cards[0]["url"]
-        from .repository import SiteRepository
-        repo = SiteRepository()
+        from .repository import RecordRepository
+        repo = RecordRepository()
         record = repo.get("3dbrute.com", newest_url)
 
-        if record and record.status == "completed":
+        if record and record.status == WorkflowStatus.COMPLETED:
             logger.info("第 1 页最新模型已下载，无新数据")
             return
 
@@ -82,7 +83,7 @@ class CrawlOrchestrator:
             if seen_done:
                 break
             record = repo.get("3dbrute.com", card["url"])
-            if record and record.status == "completed":
+            if record and record.status == WorkflowStatus.COMPLETED:
                 seen_done = True
                 continue
             self.process_model(card["url"], card["title"], card["post_id"])
