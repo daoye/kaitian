@@ -1,7 +1,6 @@
 """znzmo Uploader — 纯业务逻辑层，无 AI 依赖。"""
 
 import asyncio
-import json
 import secrets
 import time
 from pathlib import Path
@@ -142,6 +141,55 @@ class ZnzmoUploader:
             raise RuntimeError(f"封面 pictureIdentify 失败: {data}")
 
         return key
+
+    # ------------------------------------------------------------------
+    # 封面图识别 & 分类信息
+    # ------------------------------------------------------------------
+
+    async def picture_identify(self, cover_keys: list[str]) -> dict:
+        """根据封面图识别风格、分类等信息。"""
+        async with httpx.AsyncClient(cookies=self.cookies, timeout=30) as client:
+            resp = await client.post(
+                f"{API_BASE}/personCenter/pictureIdentify",
+                params={"commodityType": 0},
+                json=cover_keys,
+            )
+            data = resp.json()
+        code = data.get("error", {}).get("errorCode")
+        if code != "0":
+            raise RuntimeError(f"pictureIdentify 失败: {data}")
+        return data.get("data", {})
+
+    async def get_classify_name(self, classify_name: str, classify_type: int = 0) -> dict:
+        """获取分类路径和分类 ID。"""
+        async with httpx.AsyncClient(cookies=self.cookies, timeout=30) as client:
+            resp = await client.get(
+                f"{API_BASE}/personCenter/getClassifyName.do",
+                params={"classifyType": classify_type, "keyWord": classify_name},
+            )
+            data = resp.json()
+        if data.get("ret") != "0":
+            raise RuntimeError(f"getClassifyName 失败: {data}")
+        classify_list = data.get("data", [])
+        return classify_list[0] if classify_list else {}
+
+    async def get_dimension_recommend(self, classify_name: str, field: int, kind_level: int) -> list[dict]:
+        """获取分类下的维度推荐。"""
+        async with httpx.AsyncClient(cookies=self.cookies, timeout=30) as client:
+            resp = await client.get(
+                f"{API_BASE}/personCenter/getDimensionRecommend",
+                params={
+                    "classifyName": classify_name,
+                    "field": field,
+                    "kindLevel": kind_level,
+                    "commodityType": 0,
+                },
+            )
+            data = resp.json()
+        code = data.get("error", {}).get("errorCode")
+        if code != "0":
+            raise RuntimeError(f"getDimensionRecommend 失败: {data}")
+        return data.get("data", [])
 
     # ------------------------------------------------------------------
     # 提交 / 撤销

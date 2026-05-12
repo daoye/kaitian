@@ -60,8 +60,11 @@ def create_temp_archives(model_dir: str) -> tuple[list[str], list[dict]]:
             zip_path.unlink(missing_ok=True)
             continue
         archives.append(str(zip_path))
-        metas.append({"path": str(zip_path), "initName": zip_name, "fileCount": count})
-        print(f"  包{i+1}: {count} 个文件 → {zip_name}")
+        # initName 使用原始文件名（去掉临时 zip 后缀，保留实际后缀）
+        first_file = file_list[0]
+        actual_init_name = first_file.name if first_file.suffix else zip_name
+        metas.append({"path": str(zip_path), "initName": actual_init_name, "fileCount": count})
+        print(f"  包{i+1}: {count} 个文件 → {zip_name} (initName: {actual_init_name})")
 
     if not archives:
         raise RuntimeError("打包后无有效文件")

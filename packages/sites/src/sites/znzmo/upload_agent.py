@@ -7,7 +7,6 @@
 """
 
 import json
-import re
 from pathlib import Path
 
 from agent import (
@@ -35,24 +34,27 @@ TYPE_OPTIONS = {
     "其他": ["其他"],
 }
 
-SOFTWARE_ALIASES = {"3ds max": "MAX", "3dsmax": "MAX", "max": "MAX"}
-RENDERER_MAP = {
-    "vray": "VR", "v-ray": "VR", "corona": "CR",
-    "arnold": "Arnold", "scanline": "Scanline", "art": "ART",
-    "fstorm": "Fstorm", "d5": "D5",
-}
-
 ANALYZE_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """你是 3D 模型发布助手。分析模型元数据，决定上传策略。
-可用选项：
+    ("system", """你是 3D 模型发布助手。分析模型元数据，决定上传策略并生成展示名称。
+
+【模型名称要求】
+- 作为网站标题，必须具有可读性和可搜索性
+- 通常使用中文，专业术语（如品牌名、设计师名）可保留英文
+- 包含：品类 + 风格/特征 + 核心元素
+- 长度 10-30 个字符，不要太短或太长
+- 避免生硬的直译，使用国内用户熟悉的表达方式
+- 示例："现代简约水晶吊灯"、"北欧风格布艺单人沙发"、"Ball 8 球形玻璃吊灯"
+
+【分类要求】
 - 领域: 室内 / 建筑 / 景观 / 其他
 - 类型: 整体项目 / 独立空间 / 组件组合 / 单个物件
+
 只返回 JSON：
 ```json
 {{
   "domain": "室内",
   "category": "单个物件",
-  "model_name": "模型展示名称",
+  "model_name": "现代简约水晶吊灯",
   "reasoning": "简要理由"
 }}
 ```"""),
@@ -106,32 +108,14 @@ class UploadState(TypedDict):
     uploaded_file_keys: list[str]
     uploaded_file_parse_infos: list[dict]
     cover_keys: list[str]
+    picture_info: dict | None
+    classify_info: dict | None
+    dimension_recommend: list[dict] | None
     sku_id: int | None
     error: str | None
     result: str
     cover_repair_attempted: NotRequired[bool]
     skip_files: NotRequired[list[int]]
-
-
-# ---------------------------------------------------------------------------
-# 辅助
-# ---------------------------------------------------------------------------
-
-def _map_software_version(raw: str) -> str:
-    for alias, code in SOFTWARE_ALIASES.items():
-        if alias in raw.lower():
-            m = re.search(r"(\d{4})", raw)
-            if m:
-                return f"{code} {m.group(1)}"
-    return raw
-
-
-def _map_renderer(raw: str) -> str:
-    clean = raw.split(":")[0].split("Formats:")[0].split(",")[0].strip()
-    for key, code in RENDERER_MAP.items():
-        if key in clean.lower():
-            return code
-    return clean
 
 
 # ---------------------------------------------------------------------------
@@ -152,18 +136,16 @@ async def analyze_model(state: UploadState) -> UploadState:
         return {**state, "error": f"meta.json 不存在: {meta_file}"}
 
     meta = json.loads(meta_file.read_text(encoding="utf-8"))
-    sv_raw = meta.get("files", [{}])[0].get("software_version", "")
-    r_raw = meta.get("files", [{}])[0].get("renderer", "")
 
     analysis = {
         "model_name": meta.get("name", ""),
         "domain": "室内",
         "category": "单个物件",
-        "classify_id": 118797,
-        "classify_list": ["灯具", "吊灯", "小吊灯"],
+        "classify_id": None,  # 通过 API 获取，不硬编码
+        "classify_list": [],  # 通过 API 获取，不硬编码
         "style": "",
-        "software_version": _map_software_version(sv_raw),
-        "renderer": _map_renderer(r_raw),
+        "software_version": "",
+        "renderer": "",
         "exclusive": True,
         "original_type": 0,
         "tags": [],
@@ -176,8 +158,6 @@ async def analyze_model(state: UploadState) -> UploadState:
             "name": meta.get("name"),
             "category": meta.get("publication", {}).get("category"),
             "tags": meta.get("metadata", {}).get("tags", []),
-            "software_version": sv_raw,
-            "renderer": r_raw,
             "license": meta.get("license"),
             "style": meta.get("files", [{}])[0].get("style"),
         }
@@ -185,7 +165,8 @@ async def analyze_model(state: UploadState) -> UploadState:
         resp = await chain.ainvoke({
             "meta_json": json.dumps(meta_preview, ensure_ascii=False, indent=2),
         })
-        llm_result = parse_llm_json(resp.content if hasattr(resp, "content") else str(resp))
+        llm_result = parse_llm_json(
+            resp.content if hasattr(resp, "content") else str(resp))
 
         if llm_result.get("domain") in DOMAIN_OPTIONS:
             analysis["domain"] = llm_result["domain"]
@@ -293,13 +274,18 @@ async def upload_file_to_oss(state: UploadState) -> UploadState:
                 decision = await llm_decide(
                     FILE_ERROR_PROMPT, file_name=init_name, error=f"OSS上传失败: {e}",
                 )
-                print(f"  [cyan]文件 {i+1} 决策: {decision.action} — {decision.reasoning}[/cyan]")
+                print(
+                    f"  [cyan]文件 {i+1} 决策: {decision.action} — {decision.reasoning}[/cyan]")
                 if decision.action == "跳过":
                     skip_files.add(i)
                     continue
                 return {**state, "error": f"文件上传失败（用户中止）: {e}", "uploader": uploader}
 
             uploaded_keys.append(key)
+            # 将 oss_key 记录到 temp_archives_meta 中
+            temp_metas = state.get("temp_archives_meta", [])
+            if i < len(temp_metas):
+                temp_metas[i]["oss_key"] = key
             print(f"  [green]OSS 上传成功: {key}[/green]")
 
             upload_scene = 0 if i == 0 else 1
@@ -310,7 +296,8 @@ async def upload_file_to_oss(state: UploadState) -> UploadState:
                 decision = await llm_decide(
                     FILE_ERROR_PROMPT, file_name=init_name, error=f"文件识别失败: {e}",
                 )
-                print(f"  [cyan]文件 {i+1} 决策: {decision.action} — {decision.reasoning}[/cyan]")
+                print(
+                    f"  [cyan]文件 {i+1} 决策: {decision.action} — {decision.reasoning}[/cyan]")
                 if decision.action == "跳过":
                     skip_files.add(i)
                     continue
@@ -323,14 +310,16 @@ async def upload_file_to_oss(state: UploadState) -> UploadState:
                 decision = await llm_decide(
                     FILE_ERROR_PROMPT, file_name=init_name, error=f"文件解析失败: {e}",
                 )
-                print(f"  [cyan]文件 {i+1} 决策: {decision.action} — {decision.reasoning}[/cyan]")
+                print(
+                    f"  [cyan]文件 {i+1} 决策: {decision.action} — {decision.reasoning}[/cyan]")
                 if decision.action == "跳过":
                     skip_files.add(i)
                     continue
                 return {**state, "error": f"文件解析失败（用户中止）: {e}", "uploader": uploader}
 
             parse_infos.append(parse_info)
-            print(f"  [green]文件 {i+1} 解析完成: {parse_info.get('modelMainFormat','')} v{parse_info.get('fileVersionShow','')}[/green]")
+            print(
+                f"  [green]文件 {i+1} 解析完成: {parse_info.get('modelMainFormat', '')} v{parse_info.get('fileVersionShow', '')}[/green]")
 
         if not parse_infos:
             return {**state, "error": "所有文件均被跳过，无有效文件可提交", "uploader": uploader}
@@ -370,7 +359,8 @@ async def upload_cover(state: UploadState) -> UploadState:
     cover_keys: list[str] = []
     for idx, cover_file in enumerate(covers[:max_covers]):
         cover_path = str(cover_file.resolve())
-        print(f"  上传封面图 {idx+1}/{min(len(covers), max_covers)}: {cover_file.name}")
+        print(
+            f"  上传封面图 {idx+1}/{min(len(covers), max_covers)}: {cover_file.name}")
 
         try:
             key = await uploader.upload_cover(cover_path)
@@ -432,6 +422,54 @@ async def _agent_cover_decision(
 
 
 # ---------------------------------------------------------------------------
+# 节点 5b: 封面图识别 & 获取分类信息
+# ---------------------------------------------------------------------------
+
+async def identify_picture(state: UploadState) -> UploadState:
+    if state.get("error"):
+        return state
+
+    cover_keys = state.get("cover_keys", [])
+    if not cover_keys:
+        return state
+
+    uploader = state.get("uploader")
+    if uploader is None:
+        uploader = ZnzmoUploader()
+
+    try:
+        print("  识别封面图信息...")
+        picture_info = await uploader.picture_identify(cover_keys)
+        print(f"  [dim]pictureIdentify: {picture_info}[/dim]")
+
+        classify_name = picture_info.get("classifyName", "")
+        if classify_name:
+            print(f"  获取分类信息: {classify_name}")
+            classify_info = await uploader.get_classify_name(classify_name)
+            print(f"  [dim]分类: {classify_info.get('path', [])}[/dim]")
+
+            field = picture_info.get("field", 0)
+            kind_level = picture_info.get("kindLevel", 4)
+            print("  获取维度推荐...")
+            dimension_recommend = await uploader.get_dimension_recommend(
+                classify_name, field, kind_level
+            )
+
+            return {
+                **state,
+                "picture_info": picture_info,
+                "classify_info": classify_info,
+                "dimension_recommend": dimension_recommend,
+                "uploader": uploader,
+            }
+        else:
+            return {**state, "picture_info": picture_info, "uploader": uploader}
+    except Exception as e:
+        print(f"  [yellow]封面识别失败，使用默认值: {e}[/yellow]")
+        return {**state, "uploader": uploader}
+
+
+# ---------------------------------------------------------------------------
 # 节点 6: 提交表单
 # ---------------------------------------------------------------------------
 
@@ -439,7 +477,8 @@ async def submit_form(state: UploadState) -> UploadState:
     if state.get("error"):
         # 失败也记录
         repo = RecordRepository()
-        repo.set(UPLOAD_SITE, state["model_dir"], step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
+        repo.set(UPLOAD_SITE, state["model_dir"],
+                 step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
         return state
 
     meta: dict = state["meta"]
@@ -447,7 +486,8 @@ async def submit_form(state: UploadState) -> UploadState:
     file_parse_infos = state.get("uploaded_file_parse_infos", [])
     if not file_parse_infos:
         repo = RecordRepository()
-        repo.set(UPLOAD_SITE, state["model_dir"], step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
+        repo.set(UPLOAD_SITE, state["model_dir"],
+                 step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
         return {**state, "error": "无已上传并解析的文件"}
     cover_keys: list[str] = state.get("cover_keys", [])
     primary_cover = cover_keys[0] if cover_keys else ""
@@ -460,11 +500,28 @@ async def submit_form(state: UploadState) -> UploadState:
     model_dir = state["model_dir"]
 
     try:
-        classify_id = analysis.get("classify_id", 118797)
+        # 使用 API 返回的分类信息（优先）
+        classify_info = state.get("classify_info", {})
+        picture_info = state.get("picture_info", {})
+
+        if classify_info:
+            classify_id = classify_info.get("classifyid")
+            classify_list = classify_info.get("path", [])
+        else:
+            classify_id = analysis.get("classify_id")
+            classify_list = analysis.get("classify_list", [])
+
+        if not classify_id:
+            err_msg = "无法获取分类 ID，上传失败"
+            print(f"  [red]{err_msg}[/red]")
+            repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
+            return {**state, "error": err_msg, "uploader": uploader}
+
+        # 使用 pictureIdentify 返回的风格
+        style = picture_info.get("style", analysis.get("style", ""))
+
         name = analysis.get("model_name", meta.get("name", ""))
         tags = analysis.get("tags", [])
-        classify_list = analysis.get("classify_list", [])
-        style = analysis.get("style", "")
 
         max_price = await uploader.get_max_price(classify_id)
         print(f"  最高定价: {max_price}知币")
@@ -483,23 +540,19 @@ async def submit_form(state: UploadState) -> UploadState:
                     "file_name": pi["packagePath"],
                     "file_length": pi.get("fileLength", "0"),
                     "file_version": pi.get("fileVersionShow", ""),
-                    "initName": next(
-                        (a.get("initName", "") for a in state.get("temp_archives_meta", [])
-                         if a.get("oss_key") == pi["packagePath"]),
-                        pi["packagePath"],
-                    ),
+                    "initName": state.get("temp_archives_meta", [])[i].get("initName", pi["packagePath"]) if i < len(state.get("temp_archives_meta", [])) else pi["packagePath"],
                     "coverImg": primary_cover,
                     "softName": pi.get("softName", "3Ds MAX"),
                     "renderer": pi.get("rendererShow", "无"),
                     "modelMainFormat": pi.get("modelMainFormat", "MAX"),
-                    "precision": "0",
+                    "precision": None,
                     "packageParseResultId": pi["id"],
                 }
-                for pi in file_parse_infos
+                for i, pi in enumerate(file_parse_infos)
             ]),
             "classifyList": json.dumps(classify_list, ensure_ascii=False),
             "sgtImg": json.dumps(cover_keys),
-            "exclusiveType": 1,
+            "exclusiveType": 0,
             "labelList": json.dumps(tags, ensure_ascii=False),
             "field": 0,
             "kindLevel": 4,
@@ -520,20 +573,24 @@ async def submit_form(state: UploadState) -> UploadState:
             if raw_data is None or raw_data == "" or raw_data == 0:
                 err_msg = f"服务器返回 ret=0 但 data 为空({raw_data!r})"
                 print(f"  [red]{err_msg}[/red]")
-                repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
+                repo.set(UPLOAD_SITE, model_dir,
+                         step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
                 return {**state, "error": err_msg, "uploader": uploader}
             sku_id = int(raw_data)
             print(f"  [green]提交成功! skuId={sku_id}[/green]")
-            repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.COMPLETED, status=WorkflowStatus.COMPLETED)
+            repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.COMPLETED,
+                     status=WorkflowStatus.COMPLETED)
             return {**state, "result": f"提交成功 skuId={sku_id}", "sku_id": sku_id, "uploader": uploader}
         else:
             err_msg = result.get("msg", str(result))
             print(f"  [red]提交失败: {err_msg}[/red]")
-            repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
+            repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.FAILED,
+                     status=WorkflowStatus.FAILED)
             return {**state, "error": f"提交失败: {err_msg}", "uploader": uploader}
 
     except Exception as e:
-        repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
+        repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.FAILED,
+                 status=WorkflowStatus.FAILED)
         return {**state, "error": f"提交异常: {e}", "uploader": uploader}
 
 
@@ -581,6 +638,7 @@ def build_graph() -> StateGraph:
     graph.add_node("repackage", repackage)
     graph.add_node("upload_file_to_oss", upload_file_to_oss)
     graph.add_node("upload_cover", upload_cover)
+    graph.add_node("identify_picture", identify_picture)
     graph.add_node("submit_form", submit_form)
     graph.add_node("recall_upload", recall_upload)
     graph.add_node("cleanup", cleanup)
@@ -590,8 +648,10 @@ def build_graph() -> StateGraph:
     graph.add_edge("generate_tags", "repackage")
     graph.add_edge("repackage", "upload_file_to_oss")
     graph.add_edge("upload_file_to_oss", "upload_cover")
-    graph.add_edge("upload_cover", "submit_form")
-    graph.add_conditional_edges("submit_form", _after_submit, ["recall_upload", "cleanup"])
+    graph.add_edge("upload_cover", "identify_picture")
+    graph.add_edge("identify_picture", "submit_form")
+    graph.add_conditional_edges("submit_form", _after_submit, [
+                                "recall_upload", "cleanup"])
     graph.add_edge("recall_upload", "cleanup")
     graph.add_edge("cleanup", END)
     return graph.compile()
@@ -624,6 +684,9 @@ async def run_znzmo_upload(model_dir: str, dry_run: bool = False) -> str:
         "uploaded_file_keys": [],
         "uploaded_file_parse_infos": [],
         "cover_keys": [],
+        "picture_info": None,
+        "classify_info": None,
+        "dimension_recommend": None,
         "sku_id": None,
         "error": None,
         "result": "",
@@ -633,7 +696,8 @@ async def run_znzmo_upload(model_dir: str, dry_run: bool = False) -> str:
         # 如果流程中途失败且未被 submit_form 记录，则补充记录
         repo = RecordRepository()
         if not repo.is_completed(UPLOAD_SITE, model_dir):
-            repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.FAILED, status=WorkflowStatus.FAILED)
+            repo.set(UPLOAD_SITE, model_dir, step=WorkflowStep.FAILED,
+                     status=WorkflowStatus.FAILED)
         return f"失败: {final['error']}"
     parts = []
     keys = final.get("uploaded_file_keys", [])
@@ -666,6 +730,9 @@ async def run_znzmo_recall(sku_id: int) -> str:
         "uploaded_file_keys": [],
         "uploaded_file_parse_infos": [],
         "cover_keys": [],
+        "picture_info": None,
+        "classify_info": None,
+        "dimension_recommend": None,
         "sku_id": sku_id,
         "error": None,
         "result": "",
